@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mudbrick"
+version = "0.1.0"
+description = "Command-line tools that drive Adobe apps (InDesign, ...)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+mudbrick = "mudbrick.cli:main"
+
+[tool.setuptools]
+packages = ["mudbrick", "mudbrick.docx2pdf"]
+
+[tool.setuptools.package-data]
+"mudbrick.docx2pdf" = ["layout.jsx", "README.md"]
