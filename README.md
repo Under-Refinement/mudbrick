@@ -1,7 +1,7 @@
 # mudbrick 🧱
 
 **Run Adobe apps from the command line.** Each mudbrick tool turns a routine job you'd do
-by hand in an Adobe app into one command. (An *adobe* is a sun-dried mud brick.)
+by hand in an Adobe app into one command.
 
 ```bash
 mudbrick docx2pdf paper.docx
@@ -43,12 +43,53 @@ it. Click **OK**.
 You can also write a tool as a flag, e.g. `mudbrick --docx2pdf paper.docx`. Each tool
 has its own help: `mudbrick docx2pdf --help`.
 
-### Example: docx2pdf
+### docx2pdf: set up your folder
+
+Put the manuscript and its figures together like this:
+
+```
+my_paper/
+├── paper.docx              ← the manuscript
+├── paper_figures.docx      ← optional: figure captions (see below)
+└── figures/
+    ├── figure_1/
+    │   └── overview_v3.ai  ← any file name works inside a figure_N folder
+    ├── figure_2/
+    │   └── maps_v2.ai
+    └── figure_3/
+        └── results.ai
+```
+
+- **One folder per main figure,** named `figure_1`, `figure_2`, … (`Figure 1` or
+  `fig1` also work). The folder's number decides which figure it is, so the file names
+  inside don't matter.
+- **Use Illustrator `.ai` files if you can.** Text and lines stay sharp in print. PDF
+  also works, and so do PNG, TIFF and JPG. When saving from Illustrator, keep
+  **"Create PDF Compatible File"** checked (it's on by default), or InDesign can't read
+  the file.
+- **Fit the artboard to the artwork** (Object → Artboards → Fit to Artwork Bounds).
+  Anything outside the artboard gets cut off. Extra white space is trimmed for you.
+- **Leftovers in a figure folder are fine.** If a folder holds several versions, the
+  highest one wins (`_v3` beats `_v2`), and `.ai` or `.pdf` beats an image of the same
+  figure. Files with "panel" or "subfig" in the name, Illustrator temp files, and
+  subfolders such as `prev/` or `old/` are ignored.
+- **No folders?** Files named `figure1.ai`, `Fig2_maps.ai` and so on, sitting next to
+  the manuscript, work too.
+- **Captions** come from a separate Word file next to the manuscript whose name contains
+  "figure", "legend" or "caption", or else from a **FIGURE LEGENDS** section at the end
+  of the manuscript. Start each caption with `Figure 1.` (bold title), then the panels
+  `(A) … (B) …`. Supplementary figures are left out.
+- Word comments are ignored. Tracked changes are read as if accepted.
+
+### docx2pdf: run it
+
+Do a dry run first. It lists the file chosen for each figure and flags problems
+such as a missing caption or a placeholder title, without opening InDesign.
 
 ```bash
-mudbrick docx2pdf paper.docx                        # figures are taken from paper.docx's folder
-mudbrick docx2pdf paper.docx -f figures/ -o out.pdf # choose the figure folder and output file
-mudbrick docx2pdf paper.docx --dry-run              # check figures and warnings without opening InDesign
+cd my_paper
+mudbrick docx2pdf paper.docx -f figures/ --dry-run  # check: which file it picked for each figure, plus warnings
+mudbrick docx2pdf paper.docx -f figures/            # make paper_preprint.pdf (+ .indd) next to paper.docx
 ```
 
 ---
