@@ -91,6 +91,40 @@ White margins, including empty artboard space, are trimmed automatically.
 The script prints warnings for things to fix in the manuscript: a placeholder title,
 a missing legend, notes like `[jhd stopped here]`, or several running titles.
 
+## Equations
+
+Word equations are kept:
+
+* **Inline math** that is simple — variables, sub/superscripts, brackets, function names
+  (*z*ᵢ = 0, ε > 0, *t*₀) — is set as real text in Myriad Pro: italic variables, upright
+  numbers and function names, true sub/superscripts and thin spaces around = and +. It
+  flows and justifies with the sentence and stays editable in InDesign.
+* **Display equations** (a paragraph holding one equation, optionally with its number
+  "(n)") and inline math too complex for text (fractions, accents, matrices, sums, nested
+  scripts, script letters such as 𝓛 other than ℓ) are typeset in LaTeX (Computer Modern) and placed as vector PDFs on the text
+  baseline. Display equations are centred in the column with their number at the right
+  edge.
+
+The LaTeX renderings live in an `equations/` folder next to the manuscript. Make it once,
+and again after editing any equation in Word (needs `pandoc` and `pdflatex`, e.g.
+`brew install pandoc` and MacTeX/BasicTeX):
+
+```bash
+mudbrick docx2pdf manuscript.docx --render-math      # renders, then lays out as usual
+```
+
+Each equation is identified by its content, so text edits elsewhere don't require
+re-rendering; a changed or new equation is reported as "no rendering" until you do.
+The content is reproduced as written in Word. Only the presentation is adapted:
+Word's alignment spaces and numbering arrays are dropped, labelled braces become
+`\underbrace`, and a display equation wider than a column (`MAX_DISPLAY_BP` in
+`render_math.py`) is scaled down if it still fits at 75% or more (`SCALE_NOT_BREAK`);
+otherwise it is broken onto two lines — between the parts of an "A, B" pair, or before
+a top-level + — or, if it has no such break, scaled down further (`mathMaxW`,
+`mathMinScale` in `layout.jsx`). `equations/equations.json` records each equation's LaTeX.
+The .indd links each equation to its PDF in `equations/`, so keep that folder next to the
+manuscript. After re-rendering, InDesign's Links panel can update the equations in place.
+
 ## Layout rules
 
 * Each figure goes at the top of the page right after the page where it is first
@@ -131,3 +165,4 @@ a missing legend, notes like `[jhd stopped here]`, or several running titles.
 * Copy edits made by hand in InDesign (e.g. trimming URLs from references) aren't
   reproduced. Make these edits in Word, or touch up the saved `.indd`.
 * Tables in the main text are not handled yet; supplementary tables are skipped.
+* Equation numbers are typed text "(n)" taken from Word, not automatic numbering.

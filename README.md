@@ -80,6 +80,9 @@ my_paper/
   of the manuscript. Start each caption with `Figure 1.` (bold title), then the panels
   `(A) … (B) …`. Supplementary figures are left out.
 - Word comments are ignored. Tracked changes are read as if accepted.
+- **Equations:** if the manuscript has Word equations, add `--render-math` to the first run
+  (and after editing an equation). It typesets them with LaTeX into an `equations/` folder
+  next to the manuscript; needs `pandoc` and `pdflatex`. Simple inline math is set as text.
 
 ### docx2pdf: run it
 

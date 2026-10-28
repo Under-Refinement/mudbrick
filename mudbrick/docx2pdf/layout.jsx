@@ -31,6 +31,8 @@ var CFG = {
     sectionAfterFigures: false, // true: push a section heading (e.g. DISCUSSION) to a new
                                 // page rather than let it start before a figure cited
                                 // at the end of the previous section
+    mathMaxW: 208,             // display equations wider than this (pt) are scaled down ...
+    mathMinScale: 0.7,         // ... but never below this
     printPPI: 450,             // export: images finer than downsampleAbovePPI are
     downsampleAbovePPI: 600    //   reduced to printPPI (lossless ZIP either way)
 };
@@ -98,6 +100,13 @@ function pstyle(name, props) {
 var J = Justification.LEFT_JUSTIFIED, C = Justification.CENTER_ALIGN;
 pstyle("Body",       { justification: J, spaceAfter: 12 });
 pstyle("BodyTight",  { justification: J });
+pstyle("BodyBeforeEq", { justification: J, spaceAfter: 4, keepWithNext: 1 });   // text leading into an equation
+pstyle("Equation",   { spaceBefore: 2, spaceAfter: 8, keepAllLinesTogether: true });
+(function () {   // equation centred on a centre tab at mid-column; its number at the right edge
+    var eqs = doc.paragraphStyles.itemByName("Equation"), colW = (CFG.pageW - CFG.inside - CFG.outside - CFG.gutter) / 2;
+    if (eqs.tabStops.length) eqs.tabStops.everyItem().remove();
+    eqs.tabStops.add({ alignment: TabStopAlignment.CENTER_ALIGN, position: colW / 2 });
+})();
 pstyle("H1",         { fontStyle: "Bold", pointSize: 12, leading: 14.4, fillColor: RED, keepWithNext: 2, keepAllLinesTogether: true });
 pstyle("H1Back",     { fontStyle: "Bold", pointSize: 12, leading: 14.4, fillColor: RED, keepWithNext: 2, keepAllLinesTogether: true });
 pstyle("H2",         { fontStyle: "Bold", keepWithNext: 2, keepAllLinesTogether: true });
@@ -167,11 +176,61 @@ for (var mp = 0; mp < master.pages.length; mp++) {
     ln.geometricBounds = [CFG.footerRule, tb[1], CFG.footerRule, tb[3]];
     ln.strokeWeight = 1; ln.strokeColor = BLACK;
     var rt = pg.textFrames.add({ geometricBounds: [CFG.footerTop, tb[1], CFG.footerTop + 14, tb[3]] });
-    rt.contents = M.running_title;
+    rt.contents = M.running_title || " ";
     rt.paragraphs[0].appliedParagraphStyle = doc.paragraphStyles.itemByName("Footer");
     var pn = pg.textFrames.add({ geometricBounds: [CFG.footerTop, tb[1], CFG.footerTop + 14, tb[3]] });
     pn.contents = SpecialCharacters.AUTO_PAGE_NUMBER;
     pn.paragraphs[0].appliedParagraphStyle = doc.paragraphStyles.itemByName("PageNum");
+}
+
+// ---------------------------------------------------------------------------
+// Equations: placeholders @@MATH:key@@ become the rendered PDFs, placed inline on the
+// text baseline (display equations: centred, number at the right edge of the column)
+// ---------------------------------------------------------------------------
+var MATH_LOG = { placed: 0, scaled: [], missing: 0 };
+function placeMath(st) {
+    if (!M.math) return;
+    app.findGrepPreferences = NothingEnum.NOTHING;
+    app.findGrepPreferences.findWhat = "@@MATH:[0-9a-f]{12}@@";
+    var hits = st.findGrep();
+    app.findGrepPreferences = NothingEnum.NOTHING;
+    for (var i = hits.length - 1; i >= 0; i--) {          // from the end: indices stay valid
+        var h = hits[i], key = h.contents.substr(7, 12), e = M.math[key], idx = h.index;
+        h.remove();
+        var ip = st.insertionPoints[idx];
+        if (!e || !e.file) { ip.contents = "[equation missing]"; MATH_LOG.missing++; continue; }
+        app.pdfPlacePreferences.pdfCrop = PDFCrop.CROP_MEDIA;
+        app.pdfPlacePreferences.transparentBackground = true;
+        var placed = ip.place(File(e.file));             // linked from equations/
+        var g = (placed instanceof Array) ? placed[0] : placed;
+        var fr = (g instanceof Rectangle) ? g : g.parent;
+        var s = 1;
+        if (e.display && e.w > CFG.mathMaxW) {
+            s = Math.max(CFG.mathMinScale, CFG.mathMaxW / e.w);
+            for (var attempt = 0; attempt < 2; attempt++) {
+                try {                                  // resize the frame, then let InDesign fit
+                    var b = fr.geometricBounds;
+                    fr.geometricBounds = [b[0], b[1], b[0] + (e.h + e.d) * s, b[1] + e.w * s];
+                    fr.fit(FitOptions.CONTENT_TO_FRAME);
+                    MATH_LOG.scaled.push(Math.round(100 * s) + "%");
+                    break;
+                } catch (err) {                        // still in overset text: lay it out first
+                    if (attempt) { s = 1; LOG.push("WARNING: could not scale a wide equation: " + err.message); }
+                    else if (st === story) flow(); else doc.recompose();
+                }
+            }
+        }
+        var ch = st.characters[idx];
+        ch.baselineShift = -e.d * s;                 // the equation's own baseline on the text's
+        if (e.display) {
+            var para = ch.paragraphs[0];
+            para.leading = Math.max(12, e.h * s + 4);
+            para.spaceAfter = Math.max(8, e.d * s + 5);
+        } else if (e.h * s + 3 > 12) {
+            ch.leading = Math.ceil(e.h * s + 3);       // open up just this line
+        }
+        MATH_LOG.placed++;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -180,11 +239,13 @@ for (var mp = 0; mp < master.pages.length; mp++) {
 var p1 = doc.pages[0], b1 = textBox(p1);
 var tf = p1.textFrames.add({ geometricBounds: [160, b1[1], 480, b1[3]] });
 tf.place(File(BUILD + "/title.txt"));
+placeMath(tf.parentStory);
 // Abstract sits at the foot of page 1; a long one may use everything below the title block.
 doc.recompose();
 var titleBottom = tf.lines.length ? tf.lines[-1].baseline + 6 : 480;
 var af = p1.textFrames.add({ geometricBounds: [Math.min(480, titleBottom + 24), b1[1], CFG.abstractBottom, b1[3]] });
 af.place(File(BUILD + "/abstract.txt"));
+placeMath(af.parentStory);
 af.textFramePreferences.verticalJustification = VerticalJustification.BOTTOM_ALIGN;
 doc.recompose();
 if (af.overflows) {   // still too long: set the abstract one size smaller
@@ -216,6 +277,8 @@ function flow() {
     var guard = 0;
     while (last.overflows && guard++ < 200) { last = addBodyPage(last); doc.recompose(); }
 }
+flow();
+placeMath(story);   // after the first flow, so every equation sits on a page when placed
 flow();
 
 // ---------------------------------------------------------------------------
@@ -275,6 +338,7 @@ function legendFrame(page, tb, height, file) {
     var f = page.textFrames.add({ geometricBounds: [tb[0], tb[1], tb[0] + height, tb[3]] });
     f.textFramePreferences.ignoreWrap = true;
     f.place(file);
+    placeMath(f.parentStory);
     doc.recompose();
     return f;
 }
@@ -303,6 +367,16 @@ function dropParagraphs(f, from, to) {
     ps.itemByRange(from, to - 1).remove();
     var c = st.characters;
     if (c.length && c[-1].contents == "\r") c[-1].remove();
+}
+
+// Put a frame's graphic at size gw x gh, offset (offX, offY) from the frame's top-left.
+function fitGraphic(rect, gw, gh, offX, offY, label) {
+    // Size the art with InDesign's own fit (setting a PDF graphic's bounds directly can
+    // leave it blank on screen and in the exported PDF), then crop by moving the frame edges.
+    var f = rect.geometricBounds;
+    rect.geometricBounds = [f[0] + offY, f[1] + offX, f[0] + offY + gh, f[1] + offX + gw];
+    rect.fit(FitOptions.CONTENT_TO_FRAME);
+    rect.geometricBounds = f;
 }
 
 function placeFigure(fig, forcePi) {
@@ -382,14 +456,12 @@ function placeFigure(fig, forcePi) {
     var x0 = tb[1] + (W - figW) / 2;
 
     rect.geometricBounds = [y0, x0, y0 + figH, x0 + figW];
-    if (file) {   // scale the whole image, then shift so the content box fills the frame
-        var gw = fullW * s, gh = fullH * s;
-        var gy = y0 - crop[1] * gh, gx = x0 - crop[0] * gw;
-        rect.allGraphics[0].geometricBounds = [gy, gx, gy + gh, gx + gw];
-    }
+    var gw = fullW * s, gh = fullH * s, offX = -crop[0] * gw, offY = -crop[1] * gh;
+    if (file)     // scale the whole image, then shift so the content box fills the frame
+        fitGraphic(rect, gw, gh, offX, offY, "Figure " + fig.num);
     lf.geometricBounds = [y0 + figH + CFG.figGap, tb[1], y0 + blockH, tb[3]];
-    if (file) PLACED.push({ page: page, file: file, frame: rect.geometricBounds,
-                            graphic: rect.allGraphics[0].geometricBounds, rect: rect });
+    if (file) PLACED.push({ page: page, file: file, frame: rect.geometricBounds, num: fig.num,
+                            gw: gw, gh: gh, offX: offX, offY: offY, rect: rect });
 
     var fullPage = (avail - slot(pi).top - slot(pi).bottom - blockH - extras) < 3 * 12;
     if (atTop) {
@@ -446,7 +518,7 @@ for (var pf = 0; pf < PLACED.length; pf++) {
     nr.strokeWeight = 0;
     app.pdfPlacePreferences.pdfCrop = PDFCrop.CROP_PDF;
     nr.place(P.file);
-    nr.allGraphics[0].geometricBounds = P.graphic;
+    fitGraphic(nr, P.gw, P.gh, P.offX, P.offY, "Figure " + P.num + " (final)");
 }
 
 // ---------------------------------------------------------------------------
@@ -518,6 +590,11 @@ for (var li = 0; li < ladder.length; li++) {
     }
 }
 doc.save(File(OUTPDF.fsName.replace(/\.pdf$/i, "") + ".indd"));
+if (MATH_LOG.placed || MATH_LOG.missing)
+    LOG.push("equations placed: " + MATH_LOG.placed +
+             (MATH_LOG.scaled.length ? " (" + MATH_LOG.scaled.length + " wide display equation(s) scaled to " +
+              MATH_LOG.scaled.join(", ") + ")" : "") +
+             (MATH_LOG.missing ? "; WARNING: " + MATH_LOG.missing + " missing" : ""));
 LOG.push("pages: " + doc.pages.length);
 doc.close(SaveOptions.NO);
 LOG.join("\n");

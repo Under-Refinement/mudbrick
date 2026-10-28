@@ -25,6 +25,9 @@ def add_arguments(p):
                    help="output PDF (default: <manuscript>_preprint.pdf next to the .docx)")
     p.add_argument("-c", "--config", metavar="JSON",
                    help="JSON file overriding conversion settings (see README)")
+    p.add_argument("--render-math", action="store_true",
+                   help="first render the manuscript's equations into equations/ next to it "
+                        "(needs pandoc and pdflatex); done once, and again after editing equations")
     p.add_argument("--dry-run", action="store_true",
                    help="only read the manuscript and figures and report; don't run InDesign")
     p.add_argument("--keep-build", action="store_true",
@@ -42,6 +45,18 @@ def run(args):
     if args.config:
         with open(args.config) as fh:
             cfg.update(json.load(fh))
+
+    if args.render_math:
+        from . import render_math
+        extra = [x for x in [convert.find_legends_docx(docx, cfg)] if x]
+        try:
+            n, problems = render_math.render(docx, convert.equations_dir(docx, cfg), extra)
+        except RuntimeError as e:
+            print("mudbrick docx2pdf: --render-math: %s" % e)
+            return 2
+        print("equations rendered: %d -> %s" % (n, convert.equations_dir(docx, cfg)))
+        for line in problems:
+            print("WARNING: equation " + line)
 
     build = tempfile.mkdtemp(prefix="mudbrick_docx2pdf_")
     try:

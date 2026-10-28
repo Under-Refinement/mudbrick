@@ -23,6 +23,11 @@ import sys
 import zipfile
 import xml.etree.ElementTree as ET
 
+try:
+    from . import omml
+except ImportError:  # run as a standalone script: python3 convert.py ...
+    import omml  # noqa
+
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 DEFAULT_CONFIG = {
@@ -55,6 +60,9 @@ DEFAULT_CONFIG = {
     # Default: any other .docx next to the manuscript whose name mentions
     # figure/legend/caption. Its captions replace a FIGURE LEGENDS section.
     "legends_docx": None,
+    # Folder of rendered equations (made by `mudbrick docx2pdf paper.docx --render-math`).
+    # Default: "equations" next to the manuscript.
+    "equations_dir": None,
 }
 
 # Accepted figure formats, most preferred first (vector beats raster for print).
@@ -66,8 +74,11 @@ LINE_BREAK = " "
 SPACES = set("         ​"
              "   \t\n‑")
 FONT_CHARS = None  # code points available in the body font (None = unknown)
+LEGEND_TAGS = []   # tagged text of the figure legends (for the equations they use)
 ITALIC_ET_AL = True
 WARNINGS = []  # things the author should look at, printed at the end
+MATH = {}      # equation key -> {"runs", "display", "inline_image", "text"}
+PLAIN = {"b": False, "i": False, "sup": False, "sub": False, "u": False, "mono": False}
 
 # Headings that start the body; everything before the first of them is front matter.
 BODY_START = {"ABSTRACT", "SUMMARY", "INTRODUCTION", "BACKGROUND", "RESULTS",
@@ -134,10 +145,28 @@ def read_paragraphs(path, tracked="accept"):
             ps = ppr.find(W + "pStyle")
             pstyle = ps.get(W + "val") if ps is not None else None
         runs = []
+        maths = []        # equations in this paragraph, in order
         in_instr = False  # inside a field's instruction (e.g. Zotero JSON)
         added = {id(r) for tag in ("ins", "moveTo") for c in p.iter(W + tag)
                  for r in c.iter(W + "r")}
-        for r in p.iter(W + "r"):
+
+        def walk(el):  # w:r runs and equations, in document order
+            for c in el:
+                if omml.is_math(c):
+                    yield c
+                elif c.tag == W + "r":
+                    yield c
+                else:
+                    for x in walk(c):
+                        yield x
+        for r in walk(p):
+            if omml.is_math(r):
+                k = omml.key(r)
+                maths.append(k)
+                MATH.setdefault(k, {"runs": omml.to_runs(r), "display": False,
+                                    "text": omml.plain_text(r)})
+                runs.append((omml.TOKEN % k, dict(PLAIN, math=k, n=len(maths))))
+                continue
             if tracked == "reject" and id(r) in added:
                 continue
             fc = r.find(W + "fldChar")
@@ -189,8 +218,39 @@ def read_paragraphs(path, tracked="accept"):
                     text += chr(int(ch.get(W + "char"), 16))
             if text:
                 runs.append((text, fmt))
-        paras.append({"runs": merge_runs(runs)})
+        paras.append(finish_math({"runs": merge_runs(runs)}, maths))
     return paras
+
+
+def finish_math(p, maths):
+    """A paragraph holding one equation and at most its number "(n)" is a display
+    equation; any other equation is inline: set as text when simple, else a placeholder."""
+    other = "".join(t for t, f in p["runs"] if "math" not in f)
+    m = re.fullmatch(r"\s*(\(\s*\d+[a-z]?\s*\))?\s*", other)
+    if len(maths) == 1 and m:
+        k = maths[0]
+        MATH[k]["display"] = True
+        p["eq"] = k
+        p["eqnum"] = (m.group(1) or "").replace(" ", "")
+        p["runs"] = [("<0x0009>", dict(PLAIN, raw=True)),       # tab to the centre stop
+                     (omml.TOKEN % k, dict(PLAIN, math=k))] + (
+            [("<0x0008>", dict(PLAIN, raw=True)), (p["eqnum"], dict(PLAIN))] if p["eqnum"] else [])
+        return p
+    out = []
+    for t, f in p["runs"]:
+        if "math" in f:
+            simple = MATH[f["math"]]["runs"]
+            if simple:
+                out += [(x, dict(g)) for x, g in simple]
+                continue
+            MATH[f["math"]]["inline_image"] = True
+            out.append((t, dict(PLAIN, math=f["math"])))
+            if MATH[f["math"]]["text"][-1:].isspace():   # space typed inside the equation
+                out.append((" ", dict(PLAIN)))
+        else:
+            out.append((t, f))
+    p["runs"] = merge_runs(out)
+    return p
 
 
 def merge_runs(runs):
@@ -288,6 +348,7 @@ class Tagged:
         self.paras = []
         self.cstyles = set()
         self.missing = set()
+        self.maths = set()
 
     def para(self, pstyle, runs, bold_flag="b"):
         runs = [(t, f) for t, f in runs if t]
@@ -298,6 +359,9 @@ class Tagged:
             runs = italicize(runs, r"\bet al\.")
         out = "<pstyle:%s>" % pstyle
         for text, f in runs:
+            if f.get("raw") or f.get("math"):
+                out += self._run(text, f, bold_flag, False)
+                continue
             text = fix_typography(text).replace("\n", LINE_BREAK)
             text = re.sub(ENVELOPE + r"(?=\w)", ENVELOPE + " ", text)
             # group characters by whether they need a special font
@@ -320,6 +384,10 @@ class Tagged:
         self.paras.append(out)
 
     def _run(self, text, f, bold_flag, fallback, env=False):
+        if f.get("raw") or f.get("math"):
+            if f.get("math"):
+                self.maths.add(f["math"])
+            return text
         flags = []
         if f.get("b"):
             flags.append(bold_flag)
@@ -470,6 +538,42 @@ def add_figures_without_legends(manifest, fig_dir, out_dir, cited):
     manifest["figures"].sort(key=lambda f: f["num"])
 
 
+def equations_dir(docx_path, cfg):
+    return cfg.get("equations_dir") or os.path.join(
+        os.path.dirname(os.path.abspath(docx_path)), "equations")
+
+
+def attach_math(manifest, docx_path, out_dir, cfg, used):
+    """Record the rendered PDF of every equation placeholder and its size (pt) for
+    layout.jsx. The PDFs are placed from the equations folder itself (not copied into the
+    temporary build folder), so the .indd keeps working links to them."""
+    manifest["math"] = {}
+    manifest["math_inline_text"] = sum(1 for m in MATH.values() if m["runs"] and not m["display"])
+    if not used:
+        return
+    src = equations_dir(docx_path, cfg)
+    try:
+        with open(os.path.join(src, "equations.json"), encoding="utf-8") as fh:
+            index = json.load(fh)
+    except (OSError, ValueError):
+        index = {}
+    missing = []
+    for k in sorted(used):
+        e = index.get(k)
+        path = os.path.abspath(os.path.join(src, e["file"])) if e else None
+        if not path or not os.path.exists(path):
+            missing.append(k)
+            continue
+        manifest["math"][k] = {"file": path, "w": e["w"], "h": e["h"], "d": e["d"],
+                               "display": bool(MATH[k]["display"])}
+    for k in missing:
+        manifest["math"][k] = {"file": None, "display": bool(MATH[k]["display"])}
+    if missing:
+        WARNINGS.append("%d equation(s) have no rendering in %s (shown as [equation missing]); "
+                        "run: mudbrick docx2pdf %s --render-math"
+                        % (len(missing), src, os.path.basename(docx_path)))
+
+
 def attach_figures(manifest, fig_dir, out_dir, cfg):
     for f in manifest["figures"]:
         path = find_figure(fig_dir, f["num"]) if fig_dir else None
@@ -525,6 +629,7 @@ def plain(runs):
 def convert(docx_path, out_dir, cfg, fig_dir=None):
     global FONT_CHARS, ITALIC_ET_AL
     del WARNINGS[:]
+    MATH.clear()
     ITALIC_ET_AL = cfg["italic_et_al"]
     if cfg.get("body_font_file") and os.path.exists(cfg["body_font_file"]):
         FONT_CHARS = read_cmap(cfg["body_font_file"])
@@ -661,11 +766,14 @@ def convert(docx_path, out_dir, cfg, fig_dir=None):
     cs, miss = set(), set()
     for f in manifest["figures"]:
         f.pop("_legend", None)
-    for tg in [title, abstract, body] + [f.pop("_tg") for f in manifest["figures"]]:
+    LEGEND_TAGS[:] = [f.pop("_tg") for f in manifest["figures"]]
+    for tg in [title, abstract, body] + LEGEND_TAGS:
         cs |= tg.cstyles
         miss |= tg.missing
     manifest["cstyles"] = sorted(cs)
     attach_figures(manifest, fig_dir, out_dir, cfg)
+    attach_math(manifest, docx_path, out_dir, cfg, set().union(
+        *[tg.maths for tg in [title, abstract, body] + LEGEND_TAGS]))
     manifest["missing_glyphs"] = sorted("U+%04X" % ord(c) for c in miss)
     manifest["warnings"] = WARNINGS
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:
@@ -685,8 +793,14 @@ def emit_section(tg, head, ps, first_style="H1"):
         if re.fullmatch(r"\[[^\]]*\]", ptext(p)):
             WARNINGS.append("Editorial note left in the text: %s" % ptext(p))
         nxt = content[n + 1] if n + 1 < len(content) else None
+        if p.get("eq"):
+            tg.para("Equation", p["runs"])
+            continue
+        if nxt is not None and nxt.get("eq"):
+            tg.para("BodyBeforeEq", p["runs"])
+            continue
         short = len(ptext(p)) < 90 and nxt is not None and len(ptext(nxt)) < 90 \
-            and not is_h2(nxt)
+            and not is_h2(nxt) and not nxt.get("eq")
         tg.para("BodyTight" if short else "Body", p["runs"])
 
 
@@ -784,6 +898,10 @@ def write_legends_docx(path, figures):
     """A plain Word file with a FIGURE LEGENDS section in the house format: bold
     "Figure N. Title." paragraph, then one paragraph per panel with a bold label."""
     def run(t, f):
+        if f.get("math"):                      # equation placeholder -> its plain text
+            t = MATH.get(f["math"], {}).get("text", "")
+        if f.get("raw"):
+            t = "\t"
         props = "".join(tag for k, tag in (("b", "<w:b/>"), ("i", "<w:i/>"),
                         ("sup", '<w:vertAlign w:val="superscript"/>'),
                         ("sub", '<w:vertAlign w:val="subscript"/>')) if f.get(k))
@@ -822,6 +940,10 @@ def report(m):
             f["num"], os.path.basename(f["file"]) if f["file"] else "NOT FOUND"))
     if m.get("legends_docx_written"):
         lines.append("figure legends written to: " + m["legends_docx_written"])
+    if m.get("math") or m.get("math_inline_text"):
+        disp = sum(1 for e in m["math"].values() if e["display"])
+        lines.append("equations: %d display, %d inline as graphics, %d inline as text"
+                     % (disp, len(m["math"]) - disp, m.get("math_inline_text", 0)))
     if m["missing_glyphs"]:
         lines.append("characters not in body font (set in fallback font): %s"
                      % ", ".join(m["missing_glyphs"]))
