@@ -23,8 +23,40 @@ def para(*runs):
     return "<w:p>%s</w:p>" % "".join(runs)
 
 
-def write_docx(path, paragraphs):
+PNG_1PX = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+                        "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082")
+
+
+def picture(rid, deleted=False):
+    r = ('<w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">'
+         '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData>'
+         '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:blipFill>'
+         '<a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="%s"/>'
+         '</pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>' % rid)
+    return '<w:del w:id="1" w:author="x">%s</w:del>' % r if deleted else r
+
+
+def table(rows):
+    """rows: [[(text, span, bold)]]"""
+    out = "<w:tbl><w:tblGrid>%s</w:tblGrid>" % ('<w:gridCol w:w="1000"/>' * max(
+        sum(c[1] for c in r) for r in rows))
+    for r in rows:
+        out += "<w:tr>"
+        for text, span, bold in r:
+            pr = '<w:tcPr><w:gridSpan w:val="%d"/></w:tcPr>' % span if span > 1 else ""
+            out += "<w:tc>%s%s</w:tc>" % (pr, para(run(text, b=bold)))
+        out += "</w:tr>"
+    return out + "</w:tbl>"
+
+
+def write_docx(path, paragraphs, media=()):
     with zipfile.ZipFile(path, "w") as z:
+        for name in media:
+            z.writestr("word/media/" + name, PNG_1PX)
+        z.writestr("word/_rels/document.xml.rels",
+                   '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">%s</Relationships>'
+                   % "".join('<Relationship Id="rId%d" Type="image" Target="media/%s"/>' % (i + 1, n)
+                             for i, n in enumerate(media)))
         z.writestr("[Content_Types].xml",
                    '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
                    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
@@ -52,8 +84,11 @@ MANUSCRIPT = [
     para(run("Results text citing (Figure 1A) and (Supplementary Figure 3), "
              "as shown by Smith et al. 2020.")),
     para(run("[editor stopped here]")),
+    para(run("L = λ"), '<w:r><w:rPr><w:vertAlign w:val="subscript"/></w:rPr><w:t>dice</w:t></w:r>', run(" L")),
+    para(run("with λ = 2.0, which was chosen after a careful sweep of values.")),
     para(run("DISCUSSION", b=True)),
     para(run("Discussion text.")),
+    para(run("data availability ", b=True), run("Data are on Zenodo.")),
     para(run("REFERENCES", b=True)),
     para(run("Smith J. 2020. A paper. "), run("Journal", i=True), run(" "), run("1", b=True), run(": 1-2.")),
 ]
@@ -96,6 +131,44 @@ class Docx2PdfConvert(unittest.TestCase):
         self.assertTrue(any("editor stopped here" in w for w in self.m["warnings"]))
         self.assertLess(body.index("REFERENCES"), len(body))
 
+    def test_run_in_back_matter(self):
+        body = self.read("body.txt")
+        self.assertIn("<pstyle:H1Back>DATA AVAILABILITY", body)
+        self.assertLess(body.index("REFERENCES"), body.index("DATA AVAILABILITY"))
+        self.assertIn("<pstyle:Body>Data are on Zenodo.", body)
+
+    def test_panels_on_own_lines_when_configured(self):
+        cfg = dict(convert.DEFAULT_CONFIG, trim_figures=False, legend_panels_inline=False)
+        convert.convert(self.docx, self.build, cfg, os.path.join(self.dir, "figs"))
+        self.assertEqual(self.read("legend_1.txt").count("<pstyle:Legend>"), 2)
+
+    def test_uniform_spacing(self):
+        self.assertNotIn("BodyTight", self.read("body.txt"))
+
+    def test_equations_centered(self):
+        body = self.read("body.txt")
+        self.assertIn("<pstyle:Equation>L = ", body)
+        self.assertNotIn("<pstyle:Equation>with", body)
+
+    def test_word_equation_object(self):
+        p = convert._read_para(convert.ET.fromstring(
+            '<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+            'xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:oMathPara><m:oMath>'
+            '<m:r><m:t>E=m</m:t></m:r><m:sSup><m:e><m:r><m:t>c</m:t></m:r></m:e>'
+            '<m:sup><m:r><m:t>2</m:t></m:r></m:sup></m:sSup></m:oMath></m:oMathPara></w:p>'),
+            {}, "accept", {})
+        self.assertTrue(p["math"])
+        self.assertEqual(convert.ptext(p), "E=mc2")
+        self.assertTrue(p["runs"][-1][1]["sup"])
+
+    def test_caption_line_break_and_position_labels(self):
+        legend = convert.normalize_legend([[("Figure 2. A title.", {"b": True}), ("\n", {}),
+                                            ("(left)", {"b": True}), (" Left plot. ", {}),
+                                            ("(right)", {"b": True}), (" Right plot.", {})]])
+        self.assertEqual(legend[0][0], "LegendTitle")
+        self.assertEqual("".join(t for t, _ in legend[0][1]).strip(), "Figure 2. A title.")
+        self.assertNotIn("\n", "".join(t for _, r in legend for t, _ in r))
+
     def test_figure_choice(self):
         fig = self.m["figures"][0]
         self.assertEqual(os.path.basename(fig["file"]), "fig_v2.png")   # highest version, no panels/tmp
@@ -103,7 +176,8 @@ class Docx2PdfConvert(unittest.TestCase):
     def test_legend_from_captions_doc(self):
         legend = self.read("legend_1.txt")
         self.assertIn("<pstyle:LegendTitle><cstyle:cs_sb>Figure 1. A figure title.", legend)
-        self.assertEqual(legend.count("<pstyle:Legend>"), 2)   # (A) and the sentence-initial (B)
+        self.assertEqual(legend.count("<pstyle:Legend>"), 1)   # panels run on after the title
+        self.assertIn("here. <cstyle:cs_sb>(B)<cstyle:> Panel B.", legend)
         self.assertNotIn("TODO", legend)                         # notes between figures dropped
         self.assertTrue(os.path.exists(os.path.join(self.dir, "paper_figure_legends.docx")))
 
@@ -115,3 +189,48 @@ class Docx2PdfConvert(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Docx2PdfThreeDocuments(unittest.TestCase):
+    """Manuscript + captions .docx with embedded pictures + supplementary .docx."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.docx = os.path.join(self.dir, "paper.docx")
+        write_docx(self.docx, MANUSCRIPT)
+        write_docx(os.path.join(self.dir, "paper_maintext_figures.docx"), [
+            para(picture("rId1", deleted=True), picture("rId2")),   # old picture tracked-deleted
+            para(run("Figure 1. A title.", b=True), run(" Text.")),
+        ], media=("old.png", "new.png"))
+        write_docx(os.path.join(self.dir, "paper_supp_materials.docx"), [
+            para(picture("rId1")),
+            para(run("Supplementary Figure. 1.", b=True), run(" A supplementary figure.")),
+            para(run("Table 1: A table.", b=True)),
+            table([[("Overall", 2, True)], [("A", 1, True), ("B", 1, True)], [("1", 1, False), ("2", 1, False)]]),
+        ], media=("s1.png",))
+        self.build = os.path.join(self.dir, "build")
+
+    def test_figures_from_captions_document(self):
+        m = convert.convert(self.docx, self.build, dict(convert.DEFAULT_CONFIG, trim_figures=False),
+                            self.dir, write_outputs=False)
+        fig = m["figures"][0]
+        self.assertEqual(fig["source"], "captions document")
+        self.assertTrue(fig["file"].endswith("embedded_fig1.png"))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "paper_figure_legends.docx")))  # dry run
+
+    def test_supplement(self):
+        supp = convert.find_supplement_docx(self.docx)
+        self.assertTrue(supp.endswith("paper_supp_materials.docx"))
+        self.assertTrue(convert.find_legends_docx(self.docx, convert.DEFAULT_CONFIG)
+                        .endswith("paper_maintext_figures.docx"))
+        m = convert.convert_supplement(supp, self.docx, self.build, dict(convert.DEFAULT_CONFIG), "RT")
+        self.assertEqual(len(m["si_figures"]), 1)
+        self.assertEqual(m["tables"][0]["rows"][0][0]["span"], 2)
+        with open(os.path.join(self.build, "si.txt")) as fh:
+            si = fh.read()
+        self.assertIn("Supplementary Figure 1.", si)
+        self.assertIn("Supplementary Table 1.", si)
+        self.assertLess(si.index("[[FIG:0]]"), si.index("Supplementary Figure 1."))
+        self.assertNotIn("<pstyle:LegendTitle>", si)   # title runs into the caption text
+        self.assertIn("<pstyle:SIAffil>1. Department of Biology", si)  # same as main title page
+        self.assertIn("<pstyle:SICaption><cstyle:cs_sb>Supplementary Figure 1.", si)
