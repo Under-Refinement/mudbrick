@@ -107,6 +107,21 @@ class MathParsing(unittest.TestCase):
         self.assertEqual(manifest["math"]["abc"]["file"], os.path.join(d, "equations", "abc.pdf"))
         self.assertFalse(os.path.exists(os.path.join(build, "math")))   # nothing copied
 
+    def test_supplement_equations(self):
+        d = tempfile.mkdtemp()
+        docx(os.path.join(d, "paper.docx"), [text("Title"), text("A. Author"),
+                                              '<w:r><w:rPr><w:b/></w:rPr><w:t>ABSTRACT</w:t></w:r>'])
+        docx(os.path.join(d, "paper_supp.docx"),
+             [text("\t"), math(mr("y"), mr("="), frac(mr("a"), mr("b"))), text("\t(S1)")])
+        convert.MATH.clear()
+        m = convert.convert_supplement(os.path.join(d, "paper_supp.docx"),
+                                       os.path.join(d, "paper.docx"), os.path.join(d, "build"),
+                                       dict(convert.DEFAULT_CONFIG), "")
+        with open(os.path.join(d, "build", "si.txt"), encoding="ascii") as fh:
+            si = fh.read()
+        self.assertIn("<pstyle:DisplayMath>", si)
+        self.assertEqual(len(m["math"]), 1)                 # attached (not rendered here)
+
 
 def omml_el(xml):
     import xml.etree.ElementTree as ET

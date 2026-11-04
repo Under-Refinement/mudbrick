@@ -41,6 +41,10 @@ as a last resort no downsampling) and reports which setting it used.
 
 * The title is the first paragraph and the author line is the second. They are
   followed by the affiliations and notes (`*Equal contributions`, `✉…`).
+* The footer shows the running title. If the manuscript gives none, the footer uses
+  the full title when it fits on one line. Otherwise the title is cut at a word
+  boundary and ends with "…", measured so it never wraps or runs into the page
+  number. A warning suggests adding a `Running title:`.
 * `Keywords:` and `Running title:` can be written inline (`Keywords: a, b`) or as a
   heading with the content in the paragraphs below. If there are several
   running-title candidates, the first one is used. Empty keywords are left out.
@@ -73,6 +77,58 @@ legend gets a visible "[Legend not found…]" placeholder.
 Supplementary legends (`Figure S1`, `Movie S1`), `SUPPLEMENTARY TABLES` and
 "Supplementary Figure N" citations are ignored.
 
+### Figures pasted into the captions document
+
+If the figure folder has no file for a figure, the tool uses the picture pasted
+directly above that figure's caption in the captions document. With
+`--figures-from-captions`, it uses the pasted pictures even when files exist. Tracked
+changes apply here too: a picture marked as deleted is skipped. When a picture is
+coarser than 300 ppi at full width, the tool warns, because a vector `.ai` or `.pdf`
+would print sharper.
+
+### Supplementary information
+
+A `.docx` next to the manuscript whose name contains "supp", "supplement" or "SI"
+becomes a second PDF, `<manuscript>_supplement.pdf`, with an `.indd` alongside it. It
+has a "Supplementary Information" header with the paper's title and authors (plus the
+affiliations and correspondence line, set small, whenever the main title page has them), and is
+laid out in one column:
+* each supplementary figure with its caption below, always on the same page. If they
+  don't both fit in the space left, they move together to the next page. A figure
+  grows to the full caption width, even past its original size, as long as the figure
+  and its caption still fit on one page. Otherwise it is made as large as fits.
+* each table as a real InDesign table, with its caption above, in a minimal style:
+  a rule above and below the table and under each row of column headings, and no
+  other lines. A row that spans the whole table and is bold (e.g. "Overall
+  performance") becomes a light grey section band.
+  A table that fits on one page is never split: if it doesn't fit in the space left,
+  it moves to the next page together with its caption. Only tables taller than a page
+  break, and they repeat their header row on each page. Merged cells and Word's
+  column widths are kept, and a bold first row repeats as a header when the table
+  breaks across pages.
+
+In the supplement, each caption's bold title runs straight into its text in one
+paragraph ("**Supplementary Figure 2. Title.** (left) …"). Set
+`"supplement_title_inline": false` to give the title its own line, as the main
+paper's figures have.
+Captions are normalized to `Supplementary Figure N.` and `Supplementary Table N.`,
+whatever the original wording ("Table 1:", "Supplementary Figure. 5."). Pages are
+numbered S1, S2, … Use `--supplement FILE` to pick the supplement file yourself,
+`--no-supplement` to skip it, or `--supplement-only` to make only the supplement.
+
+A supplementary figure comes from a file in the figure folder if one matches:
+`supp_figure_1/`, `figure_S1/`, `Supp_Fig1.ai`, `FigS1.ai`, or `figure_1/` inside a
+`supp*`/`SI` folder. The same selection rules and white-margin trimming as main figures
+apply. Otherwise the picture pasted above its caption is used. The main-figure search
+never looks in supplement folders, and a figure's own folder is only ever used for that
+figure.
+
+### Title page
+
+If the title, authors and abstract don't fit on page 1, the white space above and
+between them shrinks step by step. Only if that isn't enough does the abstract drop to
+10 pt. Keywords always stay on page 1.
+
 ### Figure files
 
 These are searched from the figure folder down two levels, nearest first:
@@ -101,9 +157,12 @@ Word equations are kept:
   flows and justifies with the sentence and stays editable in InDesign.
 * **Display equations** (a paragraph holding one equation, optionally with its number
   "(n)") and inline math too complex for text (fractions, accents, matrices, sums, nested
-  scripts, script letters such as 𝓛 other than ℓ) are typeset in LaTeX (Computer Modern) and placed as vector PDFs on the text
-  baseline. Display equations are centred in the column with their number at the right
-  edge.
+  scripts, script letters such as 𝓛 other than ℓ) are typeset in LaTeX (Computer Modern)
+  and placed as vector PDFs on the text baseline. Display equations are centred in the
+  column with their number at the right edge.
+* **In the supplement** equations work the same way and share the manuscript's
+  `equations/` folder (`--render-math` renders the supplement's too). Inside table cells
+  an equation is set as its plain text.
 
 The LaTeX renderings live in an `equations/` folder next to the manuscript. Make it once,
 and again after editing any equation in Word (needs `pandoc` and `pdflatex`, e.g.
@@ -139,6 +198,30 @@ manuscript. After re-rendering, InDesign's Links panel can update the equations 
   A figure can shrink to 90% of its file size so that more of its legend fits on the
   same page. Legend panels that still don't fit continue at the foot of the next page,
   under "Figure N (continued from prior page)."
+* Figures have no border. Use `--figure-border`, or `"figure_border": true` in a
+  settings file, to draw a thin 0.5 pt border around every figure in both PDFs.
+* Word equations are typeset as described under [Equations](#equations). A short line
+  typed as plain text with "=" and almost no ordinary words, e.g.
+  `L = λdice Ldice + λfocal Lfocal`, is centered as an equation. Sub- and superscripts
+  are kept.
+* Captions (figure and table titles and legends) are justified, like the body text.
+  Manual line breaks inside a caption become spaces, so no justified line gets
+  stretched. Bold position labels such as **(left)**, **(right)**, **(top)** and
+  **(inset)** count as panel labels, like **(A)**.
+* A heading always moves to the next column together with its first lines of text.
+  If that leaves more than a line empty at the bottom of a column, the gap is shared
+  out between that column's ordinary paragraphs, adding at most 12 pt per break.
+  Headings keep exactly their usual spacing, so a column with few paragraph breaks may
+  still end slightly short. Settings: `fillColumns` and `columnFillLimit` in
+  `layout.jsx`.
+* All body paragraphs are spaced evenly, 6 pt apart, and every heading and subheading
+  has the same 10 pt above it (`paragraphSpacing` and `headingSpaceAbove` in
+  `layout.jsx`). To keep runs of short lines, such as an author-contributions list,
+  tight instead, set `"uniform_paragraph_spacing": false`.
+* A legend's bold title sits on its own line, and the panels then run on in one
+  paragraph: "…end of A. **(B)** …". If a legend doesn't fit under its figure, it
+  breaks at a line and continues on the next page. To start each panel on its own
+  line instead, set `"legend_panels_inline": false`.
 * The references come after the main text, followed by Data Availability, Author
   Contributions, Competing Interests and Acknowledgements.
 * "et al." is set in italics, and the title breaks after its colon.
