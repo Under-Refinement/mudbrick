@@ -592,11 +592,16 @@ function siFigure(ip, fig, W, maxH) {
     var para = ip.paragraphs[0];
     var room = maxH - captionHeight(para, W) - 16 - 6 - 8;   // figure space before/after + slack
     var g = ip.place(File(fig.file))[0], rect = g.parent;
-    var gb = g.geometricBounds, natW = gb[3] - gb[1], natH = gb[2] - gb[0];
+    var crop = fig.crop || [0, 0, 1, 1], gb = g.geometricBounds;
+    var fullW = gb[3] - gb[1], fullH = gb[2] - gb[0];
+    var natW = fullW * (crop[2] - crop[0]), natH = fullH * (crop[3] - crop[1]);
     var s = Math.min(W / natW, Math.max(room, 72) / natH);
     var rb = rect.geometricBounds;
     rect.geometricBounds = [rb[0], rb[1], rb[0] + natH * s, rb[1] + natW * s];
-    rect.fit(FitOptions.CONTENT_TO_FRAME);
+    // scale the whole image, then shift so the trimmed content fills the frame
+    rb = rect.geometricBounds;
+    var gw = fullW * s, gh = fullH * s, gy = rb[0] - crop[1] * gh, gx = rb[1] - crop[0] * gw;
+    rect.allGraphics[0].geometricBounds = [gy, gx, gy + gh, gx + gw];
     figureStroke(rect);
 }
 

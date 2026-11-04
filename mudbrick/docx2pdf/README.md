@@ -113,8 +113,15 @@ paragraph ("**Supplementary Figure 2. Title.** (left) …"). Set
 paper's figures have.
 Captions are normalized to `Supplementary Figure N.` and `Supplementary Table N.`,
 whatever the original wording ("Table 1:", "Supplementary Figure. 5."). Pages are
-numbered S1, S2, … Use `--supplement FILE` to pick the supplement file yourself, or
-`--no-supplement` to skip it.
+numbered S1, S2, … Use `--supplement FILE` to pick the supplement file yourself,
+`--no-supplement` to skip it, or `--supplement-only` to make only the supplement.
+
+A supplementary figure comes from a file in the figure folder if one matches:
+`supp_figure_1/`, `figure_S1/`, `Supp_Fig1.ai`, `FigS1.ai`, or `figure_1/` inside a
+`supp*`/`SI` folder. The same selection rules and white-margin trimming as main figures
+apply. Otherwise the picture pasted above its caption is used. The main-figure search
+never looks in supplement folders, and a figure's own folder is only ever used for that
+figure.
 
 ### Title page
 

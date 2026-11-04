@@ -310,7 +310,8 @@ def is_h2(p):
 
 def read_cmap(path):
     """Code points covered by an OpenType/TrueType font (cmap formats 4 and 12)."""
-    data = open(path, "rb").read()
+    with open(path, "rb") as fh:
+        data = fh.read()
     num = struct.unpack(">H", data[4:6])[0]
     off = None
     for i in range(num):
@@ -453,20 +454,35 @@ def best_figure_file(paths):
                                      -os.path.getmtime(p)))
 
 
-def find_figure(fig_dir, n):
-    """File for main figure n, searched shallowest folder first (down to two levels).
-    At each level a folder named figure_N / Fig N wins over file names; otherwise files
-    named fig1..., Figure_1..., Fig1_... are used. Old/prev/archive folders are skipped."""
-    num = r"[ _\-]*0*%d(?![0-9])" % n
-    folder_pat = re.compile(r"^fig(ure)?%s$" % num, re.I)
-    file_pat = re.compile(r"^fig(ure)?%s" % num, re.I)
-    level = [fig_dir]
+SUPP_DIR = re.compile(r"^(supp(?!ort)|si$)", re.I)
+SUPP_FIG_PREFIX = r"(?:supp(?:lement(?:al|ary)?)?[ _\-.]*fig(?:ure)?s?|fig(?:ure)?s?[ _\-.]*s)"
+ANY_FIG_DIR = re.compile(r"^(?:%s|fig(?:ure)?)[ _\-.]*\d+$" % SUPP_FIG_PREFIX, re.I)
+
+
+def find_figure(fig_dir, n, supplementary=False):
+    """File for figure n, searched shallowest folder first (down to two levels). At each
+    level a folder named for the figure wins over file names. Old/prev/archive folders
+    are skipped. Main figures: figure_1/, Fig 1/, fig1_x.ai, ...; folders that belong to
+    the supplement are not searched. Supplementary figures: supp_figure_1/, figure_S1/,
+    Supp_Fig1.ai, FigS1.ai, ..., or figure_1/ inside a supp*/SI folder."""
+    num = r"[ _\-.]*0*%d(?![0-9])" % n
+    plain = r"fig(?:ure)?" + num
+    supp = SUPP_FIG_PREFIX + num
+    level = [(fig_dir, False)]
     for _ in range(3):
         named, subdirs = [], []
-        for root in level:
+        for root, in_supp in level:
+            if supplementary:
+                body = "(?:%s|%s)" % (supp, plain) if in_supp else supp
+            else:
+                body = plain
+            folder_pat = re.compile("^%s$" % body, re.I)
+            file_pat = re.compile("^%s" % body, re.I)
             entries = sorted(os.listdir(root))
             dirs = [d for d in entries if os.path.isdir(os.path.join(root, d))
                     and not d.startswith(".") and not OLD_DIRS.match(d)]
+            if not supplementary:
+                dirs = [d for d in dirs if not SUPP_DIR.match(d)]
             for d in dirs:
                 if folder_pat.match(d):
                     folder = os.path.join(root, d)
@@ -475,7 +491,9 @@ def find_figure(fig_dir, n):
                         return best_figure_file(inside)
             named += [os.path.join(root, x) for x in entries
                       if file_pat.match(x) and _usable(x) and os.path.isfile(os.path.join(root, x))]
-            subdirs += [os.path.join(root, d) for d in dirs]
+            # a figure's own folder belongs to that figure alone: don't search inside it
+            subdirs += [(os.path.join(root, d), in_supp or bool(SUPP_DIR.match(d))) for d in dirs
+                        if not ANY_FIG_DIR.match(d)]
         if named:
             return best_figure_file(named)
         level = subdirs
@@ -494,7 +512,8 @@ def content_box(path, out_dir, threshold, pad):
     try:
         subprocess.run(["sips", "-s", "format", "bmp", "--resampleWidth", "500",
                         src, "--out", bmp], check=True, capture_output=True)
-        d = open(bmp, "rb").read()
+        with open(bmp, "rb") as fh:
+            d = fh.read()
     except (OSError, subprocess.CalledProcessError):
         return None
     finally:
@@ -1095,7 +1114,7 @@ def _supp_number(text):
     return int(m.group(2)) if m and m.group(1).lower() != "table" else None
 
 
-def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title):
+def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, fig_dir=None):
     """Supplementary .docx -> si.txt (one-column story with [[FIG:n]] / [[TABLE:n]]
     placeholders) + manifest.json for layout.jsx's supplement mode."""
     global ITALIC_ET_AL, LEGEND_INLINE
@@ -1140,9 +1159,18 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title):
             kind = "Table" if m.group(1).lower() == "table" else "Figure"
             n = int(m.group(2))
             if kind == "Figure":
-                if n in images:
+                path = None if (cfg["figures_from_captions"] and n in images) or not fig_dir \
+                    else find_figure(fig_dir, n, supplementary=True)
+                source = "file" if path else "pasted"
+                path = path or images.get(n)
+                if path:
+                    crop = [0, 0, 1, 1]
+                    if cfg["trim_figures"]:
+                        crop = content_box(path, out_dir, cfg["trim_threshold"],
+                                           cfg["trim_padding"]) or crop
                     tg.para("SIFigure", [("[[FIG:%d]]" % len(figures), {})])
-                    figures.append({"num": n, "file": images[n], "px": pixel_width(images[n])})
+                    figures.append({"num": n, "file": path, "px": pixel_width(path),
+                                    "crop": crop, "source": source})
                 else:
                     WARNINGS.append("Supplementary Figure %d has no picture." % n)
             runs = _relabel(b["runs"], m.end() - (len(b["runs"][0][0]) - len(b["runs"][0][0].lstrip())),
@@ -1178,6 +1206,10 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title):
 def report_supplement(m, supp_docx):
     lines = ["supplement: %s (%d figures, %d tables)" % (
         os.path.basename(supp_docx), len(m["si_figures"]), len(m["tables"]))]
+    for f in m["si_figures"]:
+        where = os.path.basename(f["file"]) if f["source"] == "file" else "picture in the supplement"
+        lines.append("supplementary figure %d: %s%s" % (
+            f["num"], where, " (%d px wide)" % f["px"] if f.get("px") else ""))
     for f in m["si_figures"]:
         if f.get("px") and f["px"] / TEXT_WIDTH_IN < 300:
             lines.append("WARNING: Supplementary Figure %d is a %d-px image (~%d ppi at full width)."

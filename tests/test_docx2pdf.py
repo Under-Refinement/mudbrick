@@ -210,6 +210,50 @@ class Docx2PdfThreeDocuments(unittest.TestCase):
         ], media=("s1.png",))
         self.build = os.path.join(self.dir, "build")
 
+    def test_supplementary_figure_files(self):
+        figs = os.path.join(self.dir, "figs")
+        for rel in ("supp_figure_1/s1_v1.ai", "supp_figure_1/s1_v2.ai", "figure_S2/a.ai",
+                    "supplementary/figure_3/b.ai", "figure_1/main.ai"):
+            os.makedirs(os.path.dirname(os.path.join(figs, rel)), exist_ok=True)
+            open(os.path.join(figs, rel), "wb").close()
+        open(os.path.join(figs, "Supp_Fig4.ai"), "wb").close()
+        name = lambda n: os.path.basename(convert.find_figure(figs, n, supplementary=True) or "")
+        self.assertEqual([name(1), name(2), name(3), name(4)],
+                         ["s1_v2.ai", "a.ai", "b.ai", "Supp_Fig4.ai"])
+        self.assertEqual(name(9), "")
+        # main-figure search finds main figures only, never the supplement's
+        self.assertEqual(os.path.basename(convert.find_figure(figs, 1)), "main.ai")
+        self.assertIsNone(convert.find_figure(figs, 3))
+        self.assertIsNone(convert.find_figure(figs, 4))
+
+    def test_figure_folder_contents_never_match_other_figures(self):
+        figs = os.path.join(self.dir, "figs")
+        for rel in ("supp_figure_1/figure4_old.ai", "figure_2/Fig3_maps.ai"):
+            os.makedirs(os.path.dirname(os.path.join(figs, rel)))
+            open(os.path.join(figs, rel), "wb").close()
+        self.assertIsNone(convert.find_figure(figs, 4, supplementary=True))
+        self.assertIsNone(convert.find_figure(figs, 3))
+        self.assertEqual(os.path.basename(convert.find_figure(figs, 2)), "Fig3_maps.ai")
+
+    def test_supplement_prefers_file_over_pasted_picture(self):
+        figs = os.path.join(self.dir, "figs")
+        os.makedirs(figs)
+        with open(os.path.join(figs, "FigS1.png"), "wb") as fh:
+            fh.write(PNG_1PX)
+        supp = convert.find_supplement_docx(self.docx)
+        cfg = dict(convert.DEFAULT_CONFIG, trim_figures=False)
+        fig = convert.convert_supplement(supp, self.docx, self.build, cfg, "RT", figs)["si_figures"][0]
+        self.assertEqual((fig["source"], os.path.basename(fig["file"])), ("file", "FigS1.png"))
+        fig = convert.convert_supplement(supp, self.docx, self.build,
+                                         dict(cfg, figures_from_captions=True), "RT", figs)["si_figures"][0]
+        self.assertEqual(fig["source"], "pasted")
+
+    def test_supplement_only_dry_run(self):
+        from mudbrick.cli import main
+        self.assertEqual(main(["docx2pdf", self.docx, "--supplement-only", "--dry-run"]), 0)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "paper_preprint.pdf")))
+        self.assertEqual(main(["docx2pdf", self.docx, "--supplement-only", "--no-supplement"]), 2)
+
     def test_figures_from_captions_document(self):
         m = convert.convert(self.docx, self.build, dict(convert.DEFAULT_CONFIG, trim_figures=False),
                             self.dir, write_outputs=False)

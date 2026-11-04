@@ -1,18 +1,18 @@
 # mudbrick 🧱
 
-I built mudbrick so I can run Adobe apps from the command line instead of doing the same
-layout work by hand. So far it has one tool, `docx2pdf`, which turns a Word manuscript
-into a clean, print-ready preprint with one command:
+mudbrick was built to run Adobe apps from the command line, so that routine layout work
+doesn't have to be done by hand. It currently has one tool, `docx2pdf`, which turns a Word
+manuscript into a clean, print-ready preprint with one command:
 
 ```bash
 mudbrick docx2pdf paper.docx
 ```
 
-InDesign does the layout, so you also get an `.indd` file you can open and tweak.
+The layout is done by InDesign, so an editable `.indd` file is saved alongside the PDF.
 
 ## Setup
 
-You need a Mac, InDesign, Python 3.9 or newer, and the Myriad Pro fonts (Regular, Italic,
+Required: a Mac, InDesign, Python 3.9 or newer, and the Myriad Pro fonts (Regular, Italic,
 Bold and Semibold). The fonts are free with Creative Cloud at
 [fonts.adobe.com](https://fonts.adobe.com/fonts/myriad).
 
@@ -23,12 +23,12 @@ ln -s "$PWD/bin/mudbrick" /opt/homebrew/bin/mudbrick   # or any folder on your P
 mudbrick --help                                        # check that it works
 ```
 
-There's nothing else to install. The first time you run it, your Mac asks if Terminal
-can control InDesign. Say yes.
+Nothing else needs to be installed. On the first run, macOS asks whether Terminal may
+control InDesign; this must be allowed.
 
 ## Making a preprint
 
-**1. Put your files in one folder.** The simplest setup is just Word files:
+**1. Put the files in one folder.** The simplest setup is just Word files:
 
 ```
 my_paper/
@@ -37,11 +37,11 @@ my_paper/
 └── paper_supp_materials.docx   ← optional: supplementary figures, captions and tables
 ```
 
-File names matter, because that's how mudbrick tells them apart. The captions file needs
+File names matter, because they are how the files are told apart. The captions file needs
 "figure", "legend" or "caption" in its name, and the supplement needs "supp",
 "supplement" or "SI".
 
-**2. Do a dry run.** It shows which figure files it picked and warns you about problems,
+**2. Do a dry run.** The figure files that were picked are listed and problems are flagged,
 without opening InDesign or saving anything:
 
 ```bash
@@ -55,81 +55,108 @@ mudbrick docx2pdf paper.docx --dry-run
 mudbrick docx2pdf paper.docx
 ```
 
-You'll get these, next to your manuscript:
+These are saved next to the manuscript:
 
 | File | What it is |
 |---|---|
 | `paper_preprint.pdf` and `.indd` | The preprint |
-| `paper_supplement.pdf` and `.indd` | The supplement, with pages numbered S1, S2, … (only if you have a supplement file) |
+| `paper_supplement.pdf` and `.indd` | The supplement, with pages numbered S1, S2, … (only if there is a supplement file) |
 | `paper_figure_legends.docx` | All the main figure captions in one Word file |
 
-## Want sharp figures? Use your `.ai` files
+## Sharp figures: use `.ai` files
 
-Figures pasted into Word are usually only about 200 ppi. That's fine on screen but soft
-in print, and mudbrick will warn you. For print, give it your original figures instead,
+Figures pasted into Word are usually only about 200 ppi, which is fine on screen but soft in
+print, and a warning is shown. For print, the original figures should be supplied instead,
 with one folder per figure:
 
 ```
 my_paper/
 ├── paper.docx
 ├── paper_maintext_figures.docx   ← still used for the captions
+├── paper_supp_materials.docx     ← still used for supplement captions and tables
 └── figures/
     ├── figure_1/
     │   └── overview_v3.ai        ← any file name works in here
     ├── figure_2/
     │   └── maps_v2.ai
-    └── figure_3/
-        └── results.ai
+    ├── supp_figure_1/
+    │   └── controls.ai
+    └── supp_figure_2/
+        └── statistics_v2.ai
 ```
 
 ```bash
 mudbrick docx2pdf paper.docx -f figures/
 ```
 
-A few things worth knowing:
-
 - **The folder number is the figure number.** File names inside don't matter.
-- **It's fine to leave old versions in there.** The highest version wins (`_v3` beats
-  `_v2`), and `.ai` or `.pdf` beats an image. It ignores files with "panel" or "subfig"
-  in the name, Illustrator temp files, and folders like `prev/` or `old/`.
-- **In Illustrator, fit the artboard to your artwork** (Object → Artboards → Fit to
-  Artwork Bounds). Anything outside the artboard gets cut off. Extra white space gets
-  trimmed for you.
-- **Keep "Create PDF Compatible File" checked** when you save (it's on by default), or
+- **Old versions can stay in the folder.** The highest version wins (`_v3` beats `_v2`), and
+  `.ai` or `.pdf` beats an image. Files with "panel" or "subfig" in the name, Illustrator
+  temp files, and folders like `prev/` or `old/` are ignored.
+- **In Illustrator, the artboard should fit the artwork** (Object → Artboards → Fit to
+  Artwork Bounds). Anything outside the artboard gets cut off. Extra white space is trimmed
+  automatically.
+- **"Create PDF Compatible File" must stay checked** when saving (it's on by default), or
   InDesign can't read the file.
-- **Prefer no folders?** Files named `figure1.ai`, `Fig2_maps.ai` and so on, sitting next
-  to the manuscript, work too.
+- **Folders are optional.** Files named `figure1.ai` or `Fig2_maps.ai` (main) and
+  `Supp_Fig1.ai` or `FigS2.ai` (supplement), sitting next to the manuscript, also work.
 
-## How to write the manuscript
+## Running on a supplement
+
+No separate command is needed. A Word file with "supp", "supplement" or "SI" in its name,
+next to the manuscript, is picked up automatically and becomes `paper_supplement.pdf`:
+
+```bash
+mudbrick docx2pdf paper.docx                                # supplement found by name
+mudbrick docx2pdf paper.docx --supplement other_file.docx   # or chosen directly
+mudbrick docx2pdf paper.docx --supplement-only              # only the supplement, which is faster
+mudbrick docx2pdf paper.docx --no-supplement                # or skipped
+```
+
+The supplement file should be set up like this:
+
+- **Figures:** each caption starts with `Supplementary Figure 1.` The figure comes from a
+  matching file in the `-f` folder (`supp_figure_1/`, `figure_S1/`, `Supp_Fig1.ai`, or
+  `figure_1/` inside a `supplementary/` folder). If there is no file, the picture pasted
+  directly above the caption is used. The two can be mixed.
+- **Tables:** normal Word tables, with the caption right above each one, starting
+  `Supplementary Table 1.` Column headings should be bold. A bold row that spans the whole
+  table (like "Overall performance") becomes a grey section band.
+
+The title, authors and affiliations in the supplement's header are taken from the
+manuscript, so they don't need to be repeated.
+
+## How the manuscript should be written
 
 - Start with the title, then the authors, then affiliations and correspondence.
-- Add `Keywords: …` and `Running title: …` after that. The running title goes in the
-  footer. Without one, the footer uses your title, cut off with "…" if it's too long.
+- Add `Keywords: …` and `Running title: …` after that. The running title goes in the footer.
+  Without one, the footer uses the title, cut off with "…" if it's too long.
 - Section headings are **bold ALL CAPS** (ABSTRACT, INTRODUCTION, …).
 - Subheadings are paragraphs that are entirely bold.
-- Start each caption with `Figure 1.` and a bold title, then the panels: `(A) … (B) …`.
-  Captions can also go in a FIGURE LEGENDS section of the manuscript instead of a
-  separate file.
-- Word comments are ignored, and tracked changes are read as if you accepted them.
+- Each caption starts with `Figure 1.` and a bold title, followed by the panels:
+  `(A) … (B) …`. Captions can also go in a FIGURE LEGENDS section of the manuscript instead
+  of a separate file.
+- Word comments are ignored, and tracked changes are read as if accepted.
 
-## What it does for you
+## What gets handled automatically
 
-- **Figures** go at the top of the page right after they're first mentioned, never before.
+- **Figures** are placed at the top of the page right after they're first mentioned, never
+  before.
 - **Captions** are justified, with the panels running together in one paragraph. A long
-  caption continues on the next page if it has to.
-- **Spacing** between paragraphs and above headings is the same everywhere. A heading
+  caption continues on the next page if needed.
+- **Spacing** between paragraphs and above headings is the same everywhere, and a heading
   always stays with its text.
-- **Equations** that sit on their own line are centered.
-- **The title page** tightens up to fit a long title or abstract, and keywords always stay
-  on page 1.
-- **Data availability, author contributions** and similar sections move after the
-  references, whether you wrote them as headings or as bold labels at the start of a
+- **Equations** on their own line are centered.
+- **The title page** tightens up to fit a long title or abstract, and keywords always stay on
+  page 1.
+- **Data availability, author contributions** and similar sections are moved after the
+  references, whether they were written as headings or as bold labels at the start of a
   paragraph.
-- **In the supplement,** every figure stays on the same page as its caption and grows to
-  the full caption width when it fits. Tables become real InDesign tables in a clean,
-  minimal style, and a table that fits on one page never gets split.
-- **The PDF** is made for printing: lossless images, fully embedded fonts, and anything
-  above 600 ppi reduced to 450 ppi so the files stay a reasonable size.
+- **In the supplement,** every figure stays on the same page as its caption and grows to the
+  full caption width when it fits. Tables become real InDesign tables in a clean, minimal
+  style, and a table that fits on one page is never split.
+- **The PDF** is made for printing: lossless images, fully embedded fonts, and anything above
+  600 ppi reduced to 450 ppi to keep file sizes reasonable.
 
 ## Options
 
@@ -138,13 +165,14 @@ A few things worth knowing:
 | `-f DIR` | Use the figure files in this folder |
 | `-o out.pdf` | Choose where the PDF goes |
 | `--dry-run` | Check everything without making PDFs |
-| `--supplement FILE` | Pick the supplement file yourself |
+| `--supplement FILE` | Choose the supplement file directly |
+| `--supplement-only` | Only make the supplement |
 | `--no-supplement` | Skip the supplement |
 | `--figures-from-captions` | Use the figures pasted into Word even if figure files exist |
 | `--figure-border` | Add a thin border around every figure |
 | `-c settings.json` | Change other settings for one paper |
 
-You can also write the tool as a flag: `mudbrick --docx2pdf paper.docx`.
+The tool can also be written as a flag: `mudbrick --docx2pdf paper.docx`.
 
 The full list of rules and settings is in the
 [docx2pdf README](mudbrick/docx2pdf/README.md).
@@ -157,7 +185,6 @@ Each tool is its own folder in `mudbrick/`:
 2. Register it in `TOOLS` in `mudbrick/cli.py`, and add it to `packages` in `pyproject.toml`.
 3. Run any Adobe scripts through `mudbrick.adobe.run_jsx(app, script, args)`.
 
-To run the tests (they don't need InDesign): `python3 -m unittest discover tests`
+The tests don't need InDesign: `python3 -m unittest discover tests`
 
-Please don't commit manuscripts, figures or PDFs. `.gitignore` blocks them, so they
-shouldn't get in by accident.
+Manuscripts, figures and PDFs should never be committed. They are blocked by `.gitignore`.
