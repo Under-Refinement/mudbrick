@@ -391,6 +391,7 @@ function pageOf(text) {
 
 var slots = {}; // page index -> {top: usedHeight, bottom: usedHeight}
 function slot(i) { if (!slots[i]) slots[i] = { top: 0, bottom: 0 }; return slots[i]; }
+var FIG_PAGES = {}; // page index -> true once it holds a figure (for one_figure_per_page)
 
 // Figure frames have no outline unless asked for (`mudbrick docx2pdf --figure-border`).
 // Order matters: InDesign restores a 1 pt stroke if the weight is set after the colour
@@ -459,6 +460,7 @@ function placeFigure(fig, forcePi) {
     // before it). The next section (e.g. DISCUSSION) may start on the citation page;
     // with CFG.sectionAfterFigures it is pushed to a new page below the figure instead.
     var pi = forcePi || Math.max(citePage + 1, 1);
+    while (M.one_figure_per_page && FIG_PAGES[pi]) pi++;   // that page already has a figure
     var head = at >= 0 ? nextHeading(at) : null;
     if (!forcePi && CFG.sectionAfterFigures && head && pageOf(head) >= 1 && pageOf(head) < pi) {
         head.startParagraph = StartParagraph.NEXT_PAGE;
@@ -547,6 +549,7 @@ function placeFigure(fig, forcePi) {
         slot(pi).bottom += fullPage ? avail : tb[2] - (ry2 - CFG.wrapGap);
     }
     reserve(pi);
+    FIG_PAGES[pi] = true;
 
     flow();
     LOG.push("Figure " + fig.num + ": cited p" + (citePage + 1) + ", placed p" + (pi + 1) +
@@ -665,18 +668,20 @@ function siFigure(ip, fig, W, maxH) {
     app.pdfPlacePreferences.pdfCrop = PDFCrop.CROP_PDF;
     var para = ip.paragraphs[0];
     var room = maxH - captionHeight(para, W) - 16 - 6 - 8;   // figure space before/after + slack
-    var g = ip.place(File(fig.file))[0], rect = g.parent;
-    var crop = fig.crop || [0, 0, 1, 1], gb = g.geometricBounds;
+    // Size the figure in a free frame first: placed straight into the text, a figure that
+    // lands in overset text has no geometry to read ("Invalid object for this request").
+    var rect = doc.pages[0].rectangles.add({ geometricBounds: [0, 0, 100, 100] });
+    rect.place(File(fig.file));
+    var crop = fig.crop || [0, 0, 1, 1], gb = rect.allGraphics[0].geometricBounds;
     var fullW = gb[3] - gb[1], fullH = gb[2] - gb[0];
     var natW = fullW * (crop[2] - crop[0]), natH = fullH * (crop[3] - crop[1]);
     var s = Math.min(W / natW, Math.max(room, 72) / natH);
-    var rb = rect.geometricBounds;
-    rect.geometricBounds = [rb[0], rb[1], rb[0] + natH * s, rb[1] + natW * s];
+    rect.geometricBounds = [0, 0, natH * s, natW * s];
     // scale the whole image, then shift so the trimmed content fills the frame
-    rb = rect.geometricBounds;
-    var gw = fullW * s, gh = fullH * s, gy = rb[0] - crop[1] * gh, gx = rb[1] - crop[0] * gw;
-    rect.allGraphics[0].geometricBounds = [gy, gx, gy + gh, gx + gw];
+    var gw = fullW * s, gh = fullH * s;
+    fitGraphic(rect, gw, gh, -crop[0] * gw, -crop[1] * gh, "Supplementary Figure " + fig.num);
     figureStroke(rect);
+    rect.anchoredObjectSettings.insertAnchoredObject(ip, AnchorPosition.INLINE_POSITION);
 }
 
 function siTable(ip, t, W) {

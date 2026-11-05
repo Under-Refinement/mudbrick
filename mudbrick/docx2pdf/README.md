@@ -116,6 +116,12 @@ whatever the original wording ("Table 1:", "Supplementary Figure. 5."). Pages ar
 numbered S1, S2, … Use `--supplement FILE` to pick the supplement file yourself,
 `--no-supplement` to skip it, or `--supplement-only` to make only the supplement.
 
+The preprint and the supplement are then also joined into one file,
+`<manuscript>_preprint_with_supplement.pdf` with its `.indd`: the supplement's pages
+follow the preprint's, keep their layout and are numbered S1, S2, …, so a single PDF
+can be uploaded (e.g. to bioRxiv). The separate files are still written. Use
+`--no-combine` to skip the joined file.
+
 A supplementary figure comes from a file in the figure folder if one matches:
 `supp_figure_1/`, `figure_S1/`, `Supp_Fig1.ai`, `FigS1.ai`, or `figure_1/` inside a
 `supp*`/`SI` folder. The same selection rules and white-margin trimming as main figures
@@ -198,6 +204,9 @@ manuscript. After re-rendering, InDesign's Links panel can update the equations 
   A figure can shrink to 90% of its file size so that more of its legend fits on the
   same page. Legend panels that still don't fit continue at the foot of the next page,
   under "Figure N (continued from prior page)."
+* Each main figure gets a page of its own: a figure moves on to the next page that has
+  none. Use `--figures-share-pages`, or `"one_figure_per_page": false` in a settings
+  file, to let a second figure share a page (one at the top, one at the bottom).
 * Figures have no border. Use `--figure-border`, or `"figure_border": true` in a
   settings file, to draw a thin 0.5 pt border around every figure in both PDFs.
 * Word equations are typeset as described under [Equations](#equations). A short line

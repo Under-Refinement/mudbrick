@@ -17,4 +17,4 @@ mudbrick = "mudbrick.cli:main"
 packages = ["mudbrick", "mudbrick.docx2pdf"]
 
 [tool.setuptools.package-data]
-"mudbrick.docx2pdf" = ["layout.jsx", "README.md"]
+"mudbrick.docx2pdf" = ["layout.jsx", "combine.jsx", "README.md"]

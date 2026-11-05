@@ -20,7 +20,7 @@ import zipfile
 
 from . import omml, convert
 
-SIZE_OPTION = "9.5pt"     # Computer Modern at 10.95 pt matches Myriad Pro 10 pt by x-height
+SIZE_OPTION = "10pt"      # Computer Modern size; LaTeX accepts only 10pt, 11pt or 12pt here
 BORDER_BP = 1.0          # white margin around each rendered equation (keeps overhangs)
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 BP_PER_PT = 72 / 72.27

@@ -8,7 +8,9 @@ Next to the manuscript it also looks for:
     embedded pictures stand in for figures that have no file in the figure folder
   - a supplementary .docx (name has supp/supplement/SI): laid out as a separate
     <manuscript>_supplement.pdf (+ .indd) with its figures and tables. Its figures come
-    from supp_figure_N/ or Supp_FigN files in the figure folder, else its pasted pictures
+    from supp_figure_N/ or Supp_FigN files in the figure folder, else its pasted pictures.
+    The preprint followed by the supplement is also written as one file,
+    <manuscript>_preprint_with_supplement.pdf (+ .indd), unless --no-combine.
 See mudbrick/docx2pdf/README.md for the conventions.
 """
 import json
@@ -21,6 +23,7 @@ from . import convert
 
 HELP = "Word manuscript + figures -> print-ready preprint PDF (InDesign)"
 LAYOUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "layout.jsx")
+COMBINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "combine.jsx")
 
 
 def add_arguments(p):
@@ -35,12 +38,17 @@ def add_arguments(p):
                    help="use the pictures in the captions .docx even if figure files exist")
     p.add_argument("--figure-border", action="store_true",
                    help="draw a thin border around every figure")
+    p.add_argument("--figures-share-pages", action="store_true",
+                   help="let two main figures share a page (by default each gets its own)")
     p.add_argument("--supplement", metavar="DOCX",
                    help="supplementary .docx (default: found by name next to the manuscript)")
     p.add_argument("--no-supplement", action="store_true",
                    help="don't make the supplementary PDF")
     p.add_argument("--supplement-only", action="store_true",
                    help="only make the supplementary PDF, not the main preprint")
+    p.add_argument("--no-combine", action="store_true",
+                   help="don't also make <manuscript>_preprint_with_supplement.pdf (+ .indd), "
+                        "the preprint followed by the supplement in one file")
     p.add_argument("--render-math", action="store_true",
                    help="first render the equations of the manuscript (and its captions and "
                         "supplement) into equations/ next to it (needs pandoc and pdflatex); "
@@ -66,6 +74,8 @@ def run(args):
         cfg["figures_from_captions"] = True
     if args.figure_border:
         cfg["figure_border"] = True
+    if args.figures_share_pages:
+        cfg["one_figure_per_page"] = False
     supp = None if args.no_supplement else (
         os.path.abspath(args.supplement) if args.supplement else convert.find_supplement_docx(docx))
     if args.supplement_only and args.no_supplement:
@@ -119,6 +129,13 @@ def run(args):
             print(adobe.run_jsx("indesign", LAYOUT, [supp_build, supp_out]))
             print("PDF:      " + supp_out)
             print("InDesign: " + os.path.splitext(supp_out)[0] + ".indd")
+        if smanifest and not args.supplement_only and not args.no_combine:
+            both = os.path.splitext(out)[0] + "_with_supplement.pdf"
+            print("combining preprint and supplement ...", flush=True)
+            print(adobe.run_jsx("indesign", COMBINE, [os.path.splitext(out)[0] + ".indd",
+                                                       os.path.splitext(supp_out)[0] + ".indd", both]))
+            print("PDF:      " + both)
+            print("InDesign: " + os.path.splitext(both)[0] + ".indd")
         return 0
     except adobe.AdobeError as e:
         print("mudbrick docx2pdf: InDesign failed: %s" % e)

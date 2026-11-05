@@ -72,6 +72,7 @@ These are saved next to the manuscript:
 |---|---|
 | `paper_preprint.pdf` and `.indd` | The preprint |
 | `paper_supplement.pdf` and `.indd` | The supplement, with pages numbered S1, S2, … (only if there is a supplement file) |
+| `paper_preprint_with_supplement.pdf` and `.indd` | The preprint followed by the supplement in one file, e.g. for uploading to bioRxiv (only if there is a supplement file) |
 | `paper_figure_legends.docx` | All the main figure captions in one Word file |
 | `equations/` | The rendered equations (only with `--render-math`) |
 
@@ -153,7 +154,7 @@ manuscript, so they don't need to be repeated.
 ## What gets handled automatically
 
 - **Figures** are placed at the top of the page right after they're first mentioned, never
-  before.
+  before, one figure per page.
 - **Captions** are justified, with the panels running together in one paragraph. A long
   caption continues on the next page if needed.
 - **Spacing** between paragraphs and above headings is the same everywhere, and a heading
@@ -184,8 +185,10 @@ manuscript, so they don't need to be repeated.
 | `--supplement FILE` | Choose the supplement file directly |
 | `--supplement-only` | Only make the supplement |
 | `--no-supplement` | Skip the supplement |
+| `--no-combine` | Don't make the combined preprint + supplement file |
 | `--figures-from-captions` | Use the figures pasted into Word even if figure files exist |
 | `--figure-border` | Add a thin border around every figure |
+| `--figures-share-pages` | Let two figures share a page (by default each has its own) |
 | `-c settings.json` | Change other settings for one paper |
 
 The tool can also be written as a flag: `mudbrick --docx2pdf paper.docx`.
