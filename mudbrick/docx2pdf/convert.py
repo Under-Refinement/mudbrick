@@ -23,6 +23,11 @@ import sys
 import zipfile
 import xml.etree.ElementTree as ET
 
+try:
+    from . import equations
+except ImportError:   # run as a script
+    import equations
+
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 DEFAULT_CONFIG = {
@@ -54,6 +59,14 @@ DEFAULT_CONFIG = {
     # In the supplement, run the bold caption title straight into the caption text
     # ("Supplementary Figure 2. Title. (left) ...") instead of giving it its own line.
     "supplement_title_inline": True,
+    # Supplement sections, in order (each only if present).
+    "supplement_order": ["movies", "tables", "figures"],
+    # Each supplementary figure starts on a new page.
+    "supplement_figure_per_page": True,
+    # Tables narrower than a column sit in one column; wider ones span both.
+    "supplement_table_columns": True,
+    # Supplement page numbers: "continue" from the main PDF (S1, S2, ... if unknown) or "S".
+    "supplement_page_numbers": "continue",
     # Use the pictures embedded in the captions document even when figure files exist.
     # (They are always used for figures that have no file.)
     "figures_from_captions": False,
@@ -61,6 +74,11 @@ DEFAULT_CONFIG = {
     "min_print_ppi": 300,
     # Draw a thin border around every figure (main paper and supplement).
     "figure_border": False,
+    # Typeset stand-alone Word equations with TeX in the body font (needs a TeX engine
+    # such as Tectonic: brew install tectonic). Off, or without TeX: plain text.
+    "typeset_equations": True,
+    # Sans math font for the symbols the body font lacks (big sums, integrals, ...).
+    "equation_math_font": "FiraMath-Regular.otf",
     # Crop white margins off figure files (pixels lighter than this are "white").
     "trim_figures": True,
     "trim_threshold": 245,
@@ -88,6 +106,7 @@ ITALIC_ET_AL = True
 UNIFORM_SPACING = True
 LEGEND_INLINE = True
 WARNINGS = []  # things the author should look at, printed at the end
+EQUATIONS = None  # display equations to typeset (None: leave equations as text)
 
 # Headings that start the body; everything before the first of them is front matter.
 BODY_START = {"ABSTRACT", "SUMMARY", "INTRODUCTION", "BACKGROUND", "RESULTS",
@@ -229,8 +248,14 @@ def _read_para(p, styles, tracked, rels):
             runs.append((text, fmt))
     out = {"runs": merge_runs(runs), "images": images}
     if has_math:
-        out["math"] = p.find(".//" + M_NS + "oMathPara") is not None or not "".join(
-            "".join(t.text or "" for t in r.iter(W + "t")) for r in p.iter(W + "r")).strip()
+        other = "".join(t.text or "" for t in p.iter(W + "t")).strip()
+        number = re.fullmatch(r"\(\s*([\w.\-]+)\s*\)", other)
+        out["math"] = p.find(".//" + M_NS + "oMathPara") is not None or not other \
+            or number is not None
+        roots = [e for e in p.iter(M_NS + "oMathPara")] or list(p.iter(M_NS + "oMath"))
+        if out["math"] and len(roots) == 1:
+            out["tex"] = equations.omml_to_tex(roots[0], tracked)
+            out["eq_number"] = "(%s)" % number.group(1) if number else ""
     return out
 
 
@@ -753,10 +778,11 @@ def parse_front(front, cfg):
 def convert(docx_path, out_dir, cfg, fig_dir=None, write_outputs=True):
     """Manuscript -> tagged text + manifest in out_dir. write_outputs=False (dry run)
     writes nothing next to the manuscript."""
-    global FONT_CHARS, ITALIC_ET_AL, UNIFORM_SPACING, LEGEND_INLINE
+    global FONT_CHARS, ITALIC_ET_AL, UNIFORM_SPACING, LEGEND_INLINE, EQUATIONS
     UNIFORM_SPACING = cfg["uniform_paragraph_spacing"]
     LEGEND_INLINE = cfg["legend_panels_inline"]
     del WARNINGS[:]
+    EQUATIONS = [] if cfg.get("typeset_equations", True) else None
     ITALIC_ET_AL = cfg["italic_et_al"]
     if cfg.get("body_font_file") and os.path.exists(cfg["body_font_file"]):
         FONT_CHARS = read_cmap(cfg["body_font_file"])
@@ -830,6 +856,8 @@ def convert(docx_path, out_dir, cfg, fig_dir=None, write_outputs=True):
         if name in back:
             emit_section(body, *back[name], first_style="H1Back")
 
+    manifest["equations"] = typeset_equations(out_dir, cfg) if write_outputs else []
+    manifest["equations_found"] = len(EQUATIONS or [])
     title.write(os.path.join(out_dir, "title.txt"))
     abstract.write(os.path.join(out_dir, "abstract.txt"))
     body.write(os.path.join(out_dir, "body.txt"))
@@ -919,6 +947,31 @@ def is_equation(p):
     return len(words) <= 1
 
 
+def typeset_equations(out_dir, cfg):
+    """Typeset the display equations collected by emit_section; any that can't be
+    typeset go back to plain text in their paragraph."""
+    if not EQUATIONS:
+        return []
+    font = cfg.get("body_font_file") or ""
+    results, problem = equations.render([e["tex"] for e in EQUATIONS], out_dir, font,
+                                        math_font=cfg.get("equation_math_font",
+                                                          "FiraMath-Regular.otf")) \
+        if os.path.exists(font) else ([None] * len(EQUATIONS), "body font file not found")
+    if problem:
+        WARNINGS.append("Equations: %s; %s left as plain text."
+                        % (problem, "these are" if None in results else "none"))
+    out = []
+    for k, (e, r) in enumerate(zip(EQUATIONS, results)):
+        if r is None:   # back to the Word text, centred
+            tmp = Tagged()
+            tmp.para("Equation", e["runs"])
+            e["tg"].paras[e["index"]] = tmp.paras[0]
+            e["tg"].cstyles |= tmp.cstyles
+            e["tg"].missing |= tmp.missing
+        out.append(dict(r or {}, tex=e["tex"], number=e["number"], typeset=r is not None))
+    return out
+
+
 def emit_section(tg, head, ps, first_style="H1"):
     """Body paragraphs get a blank line after them; runs of short one-liners
     (e.g. author-contribution lines) are kept tight."""
@@ -934,7 +987,16 @@ def emit_section(tg, head, ps, first_style="H1"):
         short = not UNIFORM_SPACING and len(ptext(p)) < 90 and nxt is not None \
             and len(ptext(nxt)) < 90 and not is_h2(nxt)
         if is_equation(p):
-            tg.para("Equation", p["runs"])
+            if p.get("tex") and EQUATIONS is not None:
+                EQUATIONS.append({"tex": p["tex"], "number": p["eq_number"], "tg": tg,
+                                  "index": len(tg.paras), "runs": p["runs"]})
+                tg.para("EquationTeX", [("\t[[EQ:%d]]\t%s" % (len(EQUATIONS) - 1,
+                                                          p["eq_number"]), {})])
+                # para() trims leading whitespace; the tab centres the equation
+                tg.paras[-1] = tg.paras[-1].replace("<pstyle:EquationTeX>",
+                                                    "<pstyle:EquationTeX>\t", 1)
+            else:
+                tg.para("Equation", p["runs"])
             continue
         tg.para("BodyTight" if short else "Body", p["runs"])
 
@@ -976,9 +1038,10 @@ def normalize_legend(paragraphs):
     panel only at the start of a sentence (not "...picks (B) and..."). "Figure 4:"
     becomes "Figure 4."."""
     out = []
-    # manual line breaks inside a caption are Word layout leftovers: make them spaces
-    paragraphs = [merge_runs([(re.sub(r"\s*\n\s*", " ", t), f) for t, f in runs])
-                  for runs in paragraphs]
+    # manual line breaks inside a caption are Word layout leftovers: make them spaces;
+    # repeated spaces collapse to one
+    paragraphs = [merge_runs([(re.sub(r" {2,}", " ", re.sub(r"\s*\n\s*", " ", t)), f)
+                              for t, f in runs]) for runs in paragraphs]
     for k, runs in enumerate(paragraphs):
         pieces = []
         for t, f in runs:  # split bold text in front of each panel label
@@ -1083,7 +1146,11 @@ def write_legends_docx(path, figures):
 # ----------------------------------------------------------------------------
 
 SUPP_CAPTION = re.compile(
-    r"\s*(?:Supplementa(?:l|ry)\s+)?(Figure|Fig|Table)\.?\s*S?(\d+)\s*[.:]?\s*", re.I)
+    r"\s*(?:Supplementa(?:l|ry)\s+)?(Figure|Fig|Table|Movie|Video)\.?\s*S?(\d+)\s*[.:]?\s*", re.I)
+SUPP_KIND = {"figure": "Figure", "fig": "Figure", "table": "Table", "movie": "Movie", "video": "Movie"}
+SECTION_TITLE = {"movies": "SUPPLEMENTARY MOVIES", "tables": "SUPPLEMENTARY TABLES",
+                 "figures": "SUPPLEMENTARY FIGURES"}
+COLUMN_WIDTH_PT = (507.6 - 12) / 2   # one text column of the two-column grid
 
 
 def find_supplement_docx(docx_path):
@@ -1111,92 +1178,167 @@ def _relabel(runs, n_chars, label):
 
 def _supp_number(text):
     m = SUPP_CAPTION.match(text)
-    return int(m.group(2)) if m and m.group(1).lower() != "table" else None
+    return int(m.group(2)) if m and SUPP_KIND[m.group(1).lower()] == "Figure" else None
+
+
+def supplement_label_style(paras):
+    """"S" when the manuscript cites the supplement as "Figure S1" / "Table S2",
+    "long" when it writes "Supplementary Figure 1": the labels then match the text."""
+    text = " ".join(ptext(p) for p in paras)
+    short = len(re.findall(r"\b(?:Fig(?:ure)?s?|Tables?|Movies?|Videos?)\.?\s+S\d", text))
+    long_ = len(re.findall(r"Supplementa(?:l|ry)\s+(?:Fig(?:ure)?s?|Tables?|Movies?|Videos?)", text))
+    return "S" if short > long_ else "long"
+
+
+def supplement_label(kind, n, style):
+    return "%s S%d." % (kind, n) if style == "S" else "Supplementary %s %d." % (kind, n)
+
+
+def _table_data(b):
+    rows = []
+    for row in b["rows"]:
+        cells = []
+        for cell in row:
+            ps = [p for p in cell["paras"] if ptext(p)]
+            text = "" if cell["vcont"] else "\n".join(fix_typography(ptext(p)) for p in ps)
+            cells.append({"t": text, "span": cell["span"],
+                          "b": bool(ps) and all(all_bold(p) for p in ps)})
+        rows.append(cells)
+    ncols = max([sum(c["span"] for c in r) for r in rows] + [len(b["grid"])])
+    grid = b["grid"] if len(b["grid"]) == ncols and all(b["grid"]) else [1] * ncols
+    width_pt = sum(b["grid"]) / 20.0 if all(b["grid"]) else 9999
+    return {"rows": rows, "grid": grid, "width_pt": width_pt}
 
 
 def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, fig_dir=None):
-    """Supplementary .docx -> si.txt (one-column story with [[FIG:n]] / [[TABLE:n]]
-    placeholders) + manifest.json for layout.jsx's supplement mode."""
+    """Supplementary .docx -> cover.txt (cover page) + si.txt (a two-column story with
+    [[FIG:n]] / [[TABLE:n]] placeholders, in sections: movies, tables, figures) +
+    manifest.json for layout.jsx's supplement mode."""
     global ITALIC_ET_AL, LEGEND_INLINE
     del WARNINGS[:]
     ITALIC_ET_AL = cfg["italic_et_al"]
     LEGEND_INLINE = cfg["legend_panels_inline"]
     os.makedirs(out_dir, exist_ok=True)
-    front, _ = split_front(read_paragraphs(manuscript_docx, cfg["tracked_changes"]))
+    mparas = read_paragraphs(manuscript_docx, cfg["tracked_changes"])
+    front, _ = split_front(mparas)
+    style = supplement_label_style(mparas)
     blocks = read_blocks(supp_docx, cfg["tracked_changes"])
     images = extract_caption_images(supp_docx, blocks, _supp_number, out_dir, "supp_fig%d")
 
-    tg = Tagged()
-    tg.para("SIHead", [("Supplementary Information", {})])
-    title_runs = list(front[0]["runs"]) if front else []
-    if title_runs:
-        tg.para("SITitle", plain(title_runs))
+    # ---- cover page: "Supplementary Information" over the main title block ----
+    cover = Tagged()
+    cover.para("SICoverHead", [("Supplementary Information", {})])
+    if front:
+        title_runs = list(front[0]["runs"])
+        if cfg["title_break_after_colon"]:
+            title_runs = break_after_colon(title_runs)
+        cover.para("SICoverTitle", title_runs)
     if len(front) > 1:
-        tg.para("SIAuthors", front[1]["runs"])
-    # the same affiliations and correspondence as the main title page, set compactly
-    for style, runs in parse_front(front, cfg)[0]:
-        tg.para("SIAffilGap" if style in ("AffilGap", "NoteGap") else "SIAffil", runs)
-    figures, tables = [], []
+        cover.para("Authors", front[1]["runs"])
+    for st, runs in parse_front(front, cfg)[0]:
+        cover.para(st, runs)
+    cover.write(os.path.join(out_dir, "cover.txt"))
+
+    # ---- collect movies, tables and figures with their captions --------------
+    items = {"movies": [], "tables": [], "figures": []}
+    last_table, waiting_table = None, None
     for b in blocks:
         if b["kind"] == "table":
-            rows = []
-            for row in b["rows"]:
-                cells = []
-                for cell in row:
-                    ps = [p for p in cell["paras"] if ptext(p)]
-                    text = "" if cell["vcont"] else "\n".join(fix_typography(ptext(p)) for p in ps)
-                    cells.append({"t": text, "span": cell["span"],
-                                  "b": bool(ps) and all(all_bold(p) for p in ps)})
-                rows.append(cells)
-            ncols = max([sum(c["span"] for c in r) for r in rows] + [len(b["grid"])])
-            grid = b["grid"] if len(b["grid"]) == ncols and all(b["grid"]) else [1] * ncols
-            tg.para("SITable", [("[[TABLE:%d]]" % len(tables), {})])
-            tables.append({"rows": rows, "grid": grid})
+            data = _table_data(b)
+            if last_table is not None and "data" not in last_table:
+                last_table["data"] = data          # caption above the table (usual in Word)
+            else:
+                waiting_table = data               # caption comes after the table
             continue
         t = ptext(b)
         m = SUPP_CAPTION.match(t) if t else None
-        if m:
-            kind = "Table" if m.group(1).lower() == "table" else "Figure"
-            n = int(m.group(2))
-            if kind == "Figure":
-                path = None if (cfg["figures_from_captions"] and n in images) or not fig_dir \
-                    else find_figure(fig_dir, n, supplementary=True)
-                source = "file" if path else "pasted"
-                path = path or images.get(n)
-                if path:
-                    crop = [0, 0, 1, 1]
-                    if cfg["trim_figures"]:
-                        crop = content_box(path, out_dir, cfg["trim_threshold"],
-                                           cfg["trim_padding"]) or crop
-                    tg.para("SIFigure", [("[[FIG:%d]]" % len(figures), {})])
-                    figures.append({"num": n, "file": path, "px": pixel_width(path),
-                                    "crop": crop, "source": source})
-                else:
-                    WARNINGS.append("Supplementary Figure %d has no picture." % n)
-            runs = _relabel(b["runs"], m.end() - (len(b["runs"][0][0]) - len(b["runs"][0][0].lstrip())),
-                            "Supplementary %s %d." % (kind, n))
-            legend = normalize_legend([runs])
-            if cfg["supplement_title_inline"]:   # one paragraph: bold title, then the text
-                merged = []
-                for _, r in legend:
-                    if merged:
-                        merged[-1] = (merged[-1][0].rstrip() + " ", merged[-1][1])
-                    merged += r
-                legend = [("SICaption" if kind == "Figure" else "TableCaption", merge_runs(merged))]
-            for style, r in legend:
-                if kind == "Table" and style != "TableCaption":
-                    style = {"LegendTitle": "TableTitle", "Legend": "TableLegend"}[style]
-                elif kind == "Figure" and style != "SICaption":
-                    style = {"LegendTitle": "SICaptionTitle", "Legend": "SICaption"}[style]
-                tg.para(style, r, bold_flag="sb")
-        elif t:
-            tg.para("Equation" if is_equation(b) else "SINote", b["runs"])
+        if not m:
+            if t and last_table is not None and "data" in last_table:
+                last_table["notes"].append(b)      # note under a table
+            elif t:
+                WARNINGS.append("Supplement text outside any caption left out: %s" % t[:60])
+            continue
+        kind, n = SUPP_KIND[m.group(1).lower()], int(m.group(2))
+        lead = len(b["runs"][0][0]) - len(b["runs"][0][0].lstrip())
+        runs = _relabel(b["runs"], m.end() - lead, supplement_label(kind, n, style))
+        item = {"num": n, "caption": runs, "notes": []}
+        if kind == "Table":
+            if waiting_table is not None:
+                item["data"], waiting_table = waiting_table, None
+            items["tables"].append(item)
+            last_table = item
+            continue
+        last_table = None
+        if kind == "Movie":
+            items["movies"].append(item)
+            continue
+        path = None if (cfg["figures_from_captions"] and n in images) or not fig_dir \
+            else find_figure(fig_dir, n, supplementary=True)
+        source = "file" if path else "pasted"
+        path = path or images.get(n)
+        if not path:
+            WARNINGS.append("Supplementary Figure %d has no picture." % n)
+        else:
+            crop = [0, 0, 1, 1]
+            if cfg["trim_figures"]:
+                crop = content_box(path, out_dir, cfg["trim_threshold"],
+                                   cfg["trim_padding"]) or crop
+            item.update(file=path, px=pixel_width(path), crop=crop, source=source)
+        items["figures"].append(item)
+
+    # ---- write the story ----------------------------------------------------------
+    tg = Tagged()
+    figures, tables = [], []
+
+    def caption(runs, style_inline, style_title, style_text):
+        legend = normalize_legend([runs])
+        if cfg["supplement_title_inline"]:
+            merged = []
+            for _, r in legend:
+                if merged:
+                    merged[-1] = (merged[-1][0].rstrip() + " ", merged[-1][1])
+                merged += r
+            legend = [(style_inline, merge_runs(merged))]
+        else:
+            legend = [(style_title if st == "LegendTitle" else style_text, r) for st, r in legend]
+        for st, r in legend:
+            tg.para(st, r, bold_flag="sb")
+
+    for section in cfg["supplement_order"]:
+        group = sorted(items[section], key=lambda x: x["num"])
+        if not group:
+            continue
+        tg.para("SISection", [(SECTION_TITLE[section], {})])
+        for k, item in enumerate(group):
+            if section == "movies":
+                caption(item["caption"], "SIMovie", "SIMovieTitle", "SIMovie")
+            elif section == "tables":
+                if "data" not in item:
+                    WARNINGS.append("Supplementary Table %d has no table." % item["num"])
+                    continue
+                data = item["data"]
+                wide = not cfg["supplement_table_columns"] or data["width_pt"] > COLUMN_WIDTH_PT * 1.08
+                data["wide"] = wide
+                sfx = "Wide" if wide else ""
+                tg.para("SITable" + sfx, [("[[TABLE:%d]]" % len(tables), {})])
+                tables.append(data)
+                caption(item["caption"], "TableCaption" + sfx, "TableCaptionTitle" + sfx,
+                        "TableCaption" + sfx)
+                for nb in item["notes"]:
+                    tg.para("SINote" + sfx, nb["runs"])
+            elif "file" in item:
+                first = k == 0
+                tg.para("SIFigure" if first or not cfg["supplement_figure_per_page"]
+                        else "SIFigureNewPage", [("[[FIG:%d]]" % len(figures), {})])
+                figures.append({x: item[x] for x in ("num", "file", "px", "crop", "source")})
+                caption(item["caption"], "SICaption", "SICaptionTitle", "SICaption")
     tg.write(os.path.join(out_dir, "si.txt"))
     manifest = {"mode": "supplement", "running_title": running_title,
                 "figure_border": cfg["figure_border"],
                 "figures": [], "si_figures": figures, "tables": tables,
-                "cstyles": sorted(tg.cstyles | {"cs_sb_i"}),
-                "missing_glyphs": sorted("U+%04X" % ord(c) for c in tg.missing),
+                "movies": len(items["movies"]), "label_style": style,
+                "cstyles": sorted(tg.cstyles | cover.cstyles | {"cs_sb_i"}),
+                "missing_glyphs": sorted("U+%04X" % ord(c) for c in tg.missing | cover.missing),
                 "warnings": WARNINGS}
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=1, ensure_ascii=False)
@@ -1204,8 +1346,9 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, 
 
 
 def report_supplement(m, supp_docx):
-    lines = ["supplement: %s (%d figures, %d tables)" % (
-        os.path.basename(supp_docx), len(m["si_figures"]), len(m["tables"]))]
+    lines = ["supplement: %s (%d figures, %d tables, %d movies; labels like %r)" % (
+        os.path.basename(supp_docx), len(m["si_figures"]), len(m["tables"]), m["movies"],
+        supplement_label("Figure", 1, m["label_style"]))]
     for f in m["si_figures"]:
         where = os.path.basename(f["file"]) if f["source"] == "file" else "picture in the supplement"
         lines.append("supplementary figure %d: %s%s" % (
@@ -1230,6 +1373,13 @@ def report(m):
         lines.append("figure %d: %s" % (f["num"], where))
     if m.get("legends_docx_written"):
         lines.append("figure legends written to: " + m["legends_docx_written"])
+    if m.get("equations_found"):
+        done = sum(1 for e in m.get("equations", []) if e["typeset"])
+        engine = equations.find_engine()
+        lines.append("equations: %d stand-alone, %s" % (
+            m["equations_found"], "%d typeset with TeX" % done if m.get("equations")
+            else "to be typeset with " + os.path.basename(engine) if engine
+            else "left as text (no TeX engine; brew install tectonic)"))
     if m["missing_glyphs"]:
         lines.append("characters not in body font (set in fallback font): %s"
                      % ", ".join(m["missing_glyphs"]))

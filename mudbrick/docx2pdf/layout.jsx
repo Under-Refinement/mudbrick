@@ -14,7 +14,8 @@ var CFG = {
     pageW: 612, pageH: 792,
     top: 46.8, bottom: 54, inside: 50.4, outside: 54,
     gutter: 12,
-    footerRule: 741, footerTop: 742,
+    footerRule: 741, footerTop: 746,   // footer text sits 5 pt below the rule
+    footerLines: 2,            // running title may wrap to this many lines before shortening
     font: "Myriad Pro",
     fallbackFont: "Arial Unicode MS", // for characters Myriad Pro lacks
     emojiFont: ["Noto Color Emoji SVG", "Regular"],  // for the correspondence envelope
@@ -36,12 +37,15 @@ var CFG = {
                                 // page rather than let it start before a figure cited
                                 // at the end of the previous section
     printPPI: 450,             // export: images finer than downsampleAbovePPI are
-    downsampleAbovePPI: 600    //   reduced to printPPI (lossless ZIP either way)
+    downsampleAbovePPI: 600,   //   reduced to printPPI (lossless ZIP either way)
+    embedFigures: true         // embed every placed .ai/.pdf/image in the saved .indd, so
+                               // it opens on any computer without the figure files
 };
 
-var BUILD, OUTPDF;
+var BUILD, OUTPDF, START_PAGE = 0;   // START_PAGE: first page number (supplement)
 if (typeof arguments !== "undefined" && arguments.length >= 2) {
     BUILD = Folder(arguments[0]); OUTPDF = File(arguments[1]);
+    if (arguments.length >= 3) START_PAGE = parseInt(arguments[2], 10) || 0;
 } else {
     BUILD = Folder.selectDialog("Folder produced by docx_to_indesign.py");
     OUTPDF = File.saveDialog("Save PDF as", "*.pdf");
@@ -103,6 +107,15 @@ var J = Justification.LEFT_JUSTIFIED, C = Justification.CENTER_ALIGN;
 pstyle("Body",       { justification: J, spaceAfter: CFG.paragraphSpacing });
 pstyle("BodyTight",  { justification: J });
 pstyle("Equation",   { justification: C, spaceAfter: CFG.paragraphSpacing });  // stand-alone equations
+// TeX-typeset equations: centred on the column by a centre tab, number on a right tab.
+var COL_W = (CFG.pageW - CFG.inside - CFG.outside - CFG.gutter) / 2;
+(function () {
+    var st = pstyle("EquationTeX", { justification: Justification.LEFT_ALIGN,
+        spaceAfter: CFG.paragraphSpacing, spaceBefore: 2, keepLinesTogether: true });
+    st.tabStops.everyItem().remove();
+    st.tabStops.add({ alignment: TabStopAlignment.CENTER_ALIGN, position: COL_W / 2 });
+    st.tabStops.add({ alignment: TabStopAlignment.RIGHT_ALIGN, position: COL_W });
+})();
 // Headings get the same space above them everywhere (paragraph spacing + this);
 // InDesign drops it when a heading starts a column.
 var HEAD_GAP = Math.max(0, CFG.headingSpaceAbove - CFG.paragraphSpacing);
@@ -125,7 +138,7 @@ pstyle("LegendTitle", { fontStyle: SEMIBOLD, pointSize: 9, leading: 10.8, justif
 pstyle("Legend",     { pointSize: 9, leading: 10.8, spaceBefore: 2, justification: J,
                        keepLinesTogether: true, keepFirstLines: 2, keepLastLines: 2 });
 pstyle("LegendCont", { fontStyle: SEMIBOLD, pointSize: 9, leading: 10.8, justification: J });
-pstyle("Footer",     { fontStyle: "Italic", justification: C });
+pstyle("Footer",     { fontStyle: "Italic", justification: C, balanceRaggedLines: true });
 pstyle("PageNum",    { fontStyle: "Bold", justification: Justification.RIGHT_ALIGN });
 
 // Character styles are named after their flags: cs_b_i_sup -> bold italic superscript.
@@ -150,26 +163,47 @@ function cstyle(name) {
 }
 for (var ci = 0; ci < M.cstyles.length; ci++) cstyle(M.cstyles[ci]);
 
-// Supplementary-information mode: one-column story of figures, captions and tables.
+// Supplementary-information mode: a cover page, then a two-column story in sections
+// (movies, tables, figures). Headers, figures, captions and wide tables span both
+// columns; tables narrower than a column sit in one.
 var SI = M.mode == "supplement";
-pstyle("SIHead",     { fontStyle: "Bold", pointSize: 14, leading: 16.8, fillColor: RED, spaceAfter: 6 });
-pstyle("SITitle",    { fontStyle: "Bold", pointSize: 12, leading: 14.4, spaceAfter: 4 });
-pstyle("SIAuthors",  { spaceAfter: 4 });
-pstyle("SIAffil",    { pointSize: 8.5, leading: 10.2 });
-pstyle("SIAffilGap", { pointSize: 8.5, leading: 10.2, spaceBefore: 4 });
+function span(props) {
+    var o = {};
+    for (var k in props) o[k] = props[k];
+    o.spanColumnType = SpanColumnTypeOptions.SPAN_COLUMNS;
+    return o;
+}
+pstyle("SICoverHead", { fontStyle: "Bold", pointSize: 16, leading: 19.2, justification: C, spaceAfter: 150 });
+pstyle("SICoverTitle", { fontStyle: "Bold", pointSize: 16, leading: 19.2, justification: C });
+pstyle("SISection",  span({ fontStyle: "Bold", pointSize: 12, leading: 14.4, fillColor: RED,
+                            spaceAfter: 6, keepWithNext: 2, startParagraph: StartParagraph.NEXT_PAGE }));
+pstyle("SIMovieTitle", span({ fontStyle: SEMIBOLD, pointSize: 9, leading: 10.8, justification: J,
+                              keepWithNext: 2, keepAllLinesTogether: true }));
+pstyle("SIMovie",    span({ pointSize: 9, leading: 10.8, justification: J, spaceAfter: 8,
+                            keepAllLinesTogether: true }));
 // A supplementary figure and its caption stay on one page: the figure keeps with the
 // caption, and the caption is never split.
-pstyle("SIFigure",   { justification: C, leading: Leading.AUTO, spaceBefore: 16, spaceAfter: 6,
-                       keepWithNext: 1 });
-pstyle("SICaption",  { pointSize: 9, leading: 10.8, spaceBefore: 2, justification: J,
-                       keepAllLinesTogether: true });
-pstyle("SICaptionTitle", { fontStyle: SEMIBOLD, pointSize: 9, leading: 10.8, justification: J,
-                           keepAllLinesTogether: true, keepWithNext: 5 });
-pstyle("SITable",    { leading: Leading.AUTO, spaceBefore: 6, spaceAfter: 8 });
-pstyle("TableTitle", { fontStyle: SEMIBOLD, pointSize: 9, leading: 10.8, spaceBefore: 16, keepWithNext: 2, justification: J });
-pstyle("TableLegend", { pointSize: 9, leading: 10.8, spaceBefore: 2, keepWithNext: 2, justification: J });
-pstyle("TableCaption", { pointSize: 9, leading: 10.8, spaceBefore: 16, keepWithNext: 2, justification: J });
-pstyle("SINote",     { pointSize: 8, leading: 9.6, spaceAfter: 6, justification: J });
+pstyle("SIFigure",   span({ justification: C, leading: Leading.AUTO, spaceBefore: 6, spaceAfter: 6,
+                            keepWithNext: 1 }));
+pstyle("SIFigureNewPage", span({ justification: C, leading: Leading.AUTO, spaceAfter: 6,
+                                 keepWithNext: 1, startParagraph: StartParagraph.NEXT_PAGE }));
+pstyle("SICaption",  span({ pointSize: 9, leading: 10.8, spaceBefore: 2, spaceAfter: 12,
+                            justification: J, keepAllLinesTogether: true }));
+pstyle("SICaptionTitle", span({ fontStyle: SEMIBOLD, pointSize: 9, leading: 10.8, justification: J,
+                                keepAllLinesTogether: true, keepWithNext: 5 }));
+// Tables: caption below the table, as in the reference supplement.
+pstyle("SITable",    { leading: Leading.AUTO, spaceBefore: 4, spaceAfter: 4 });
+pstyle("SITableWide", span({ leading: Leading.AUTO, spaceBefore: 4, spaceAfter: 4 }));
+pstyle("TableCaption", { pointSize: 9, leading: 10.8, spaceAfter: 14, justification: J,
+                         keepAllLinesTogether: true });
+pstyle("TableCaptionWide", span({ pointSize: 9, leading: 10.8, spaceAfter: 14, justification: J,
+                                  keepAllLinesTogether: true }));
+pstyle("TableCaptionTitle", { fontStyle: SEMIBOLD, pointSize: 9, leading: 10.8, justification: J,
+                              keepWithNext: 5 });
+pstyle("TableCaptionTitleWide", span({ fontStyle: SEMIBOLD, pointSize: 9, leading: 10.8,
+                                       justification: J, keepWithNext: 5 }));
+pstyle("SINote",     { pointSize: 8, leading: 9.6, spaceAfter: 12, justification: J });
+pstyle("SINoteWide", span({ pointSize: 8, leading: 9.6, spaceAfter: 12, justification: J }));
 pstyle("TableCell",  { pointSize: 7.5, leading: 9 });
 
 with (app.taggedTextImportPreferences) {
@@ -192,8 +226,9 @@ function textBox(page) {   // [y1, x1, y2, x2] of the live area
 // Master pages: footer rule, running title, page number
 // ---------------------------------------------------------------------------
 var master = doc.masterSpreads[0];
-// The running title must fit on one line, clear of the page number: if it doesn't,
-// shorten it at a word boundary and end it with an ellipsis.
+// The running title is shown in full, on up to CFG.footerLines (balanced) lines, clear
+// of the page number. Only if it still doesn't fit is it shortened at a word boundary
+// and ended with an ellipsis.
 var FOOTER_TITLE = null;
 function fitFooterTitle(frame, text) {
     var words = text.split(/\s+/), t = text;
@@ -201,7 +236,7 @@ function fitFooterTitle(frame, text) {
         frame.parentStory.contents = t;   // the whole story, including any overset text
         frame.paragraphs[0].appliedParagraphStyle = doc.paragraphStyles.itemByName("Footer");
         doc.recompose();
-        if (!frame.overflows && frame.lines.length <= 1) return t;
+        if (!frame.overflows && frame.lines.length <= CFG.footerLines) return t;
         if (words.length <= 1) return t;
         words.pop();
         t = words.join(" ").replace(/[\s,;:.\-\u2013\u2014]+$/, "") + "\u2026";
@@ -213,7 +248,7 @@ for (var mp = 0; mp < master.pages.length; mp++) {
     ln.geometricBounds = [CFG.footerRule, tb[1], CFG.footerRule, tb[3]];
     ln.strokeWeight = 1; ln.strokeColor = BLACK;
     var rt = pg.textFrames.add({ geometricBounds:   // 40 pt kept clear for the page number
-        [CFG.footerTop, tb[1] + 40, CFG.footerTop + 14, tb[3] - 40] });
+        [CFG.footerTop, tb[1] + 40, CFG.footerTop + 12 * CFG.footerLines + 2, tb[3] - 40] });
     if (FOOTER_TITLE === null) {
         FOOTER_TITLE = fitFooterTitle(rt, M.running_title);
         if (FOOTER_TITLE != M.running_title) LOG.push("Footer title shortened to fit: " + FOOTER_TITLE);
@@ -230,6 +265,16 @@ for (var mp = 0; mp < master.pages.length; mp++) {
 // Page 1: title block and bottom-aligned abstract
 // ---------------------------------------------------------------------------
 if (!SI) layoutTitlePage();
+else layoutCover();
+
+// Supplement cover: "Supplementary Information" above the main paper's title block.
+function layoutCover() {
+    var p1 = doc.pages[0], b1 = textBox(p1);
+    var cf = p1.textFrames.add({ geometricBounds: [120, b1[1], 720, b1[3]] });
+    cf.place(File(BUILD + "/cover.txt"));
+    doc.recompose();
+    if (cf.overflows) LOG.push("WARNING: supplement cover text overflows.");
+}
 
 // Page 1. The title block starts 160 pt down with generous gaps; the abstract sits at the
 // foot of the page. If it all doesn't fit, tighten step by step: less white space above
@@ -276,12 +321,12 @@ function layoutTitlePage() {
 function addBodyPage(prevFrame, page) {
     page = page || doc.pages.add(LocationOptions.AT_END);
     var fr = page.textFrames.add({ geometricBounds: textBox(page) });
-    fr.textFramePreferences.textColumnCount = SI ? 1 : 2;
+    fr.textFramePreferences.textColumnCount = 2;
     fr.textFramePreferences.textColumnGutter = CFG.gutter;
     if (prevFrame) prevFrame.nextTextFrame = fr;
     return fr;
 }
-var first = SI ? addBodyPage(null, doc.pages[0]) : addBodyPage(null);
+var first = addBodyPage(null);   // the body (or supplement content) starts on page 2
 first.place(File(BUILD + (SI ? "/si.txt" : "/body.txt")));
 var story = first.parentStory;
 
@@ -291,6 +336,41 @@ function flow() {
     var guard = 0;
     while (last.overflows && guard++ < 200) { last = addBodyPage(last); doc.recompose(); }
 }
+flow();
+
+// Equations typeset with TeX (equations.pdf, one page each) replace their [[EQ:k]]
+// placeholders as inline graphics sitting on the text baseline.
+function placeEquations() {
+    var eqs = M.equations || [], n = 0;
+    if (!eqs.length) return;
+    app.pdfPlacePreferences.pdfCrop = PDFCrop.CROP_MEDIA;   // keep TeX's exact box
+    var maxW = COL_W - 2 * 28;                               // room for the number
+    for (var k = 0; k < eqs.length; k++) {
+        var e = eqs[k];
+        app.findGrepPreferences = NothingEnum.NOTHING;
+        app.findGrepPreferences.findWhat = "\\[\\[EQ:" + k + "\\]\\]";
+        var hits = story.findGrep();
+        if (!hits.length || !e.typeset) continue;
+        var hit = hits[0], para = hit.paragraphs[0], idx = hit.index;
+        hit.remove();
+        app.pdfPlacePreferences.pageNumber = e.page;
+        var g = story.insertionPoints[idx].place(File(e.file))[0], rect = g.parent;
+        var sc = Math.min(1, maxW / e.width);
+        if (sc < 1) {
+            g.absoluteHorizontalScale = g.absoluteVerticalScale = sc * 100;
+            rect.fit(FitOptions.FRAME_TO_CONTENT);
+            LOG.push("Equation " + (e.number || k + 1) + " scaled to " + Math.round(sc * 100) + "% to fit the column.");
+        }
+        rect.strokeWeight = 0; rect.strokeColor = doc.swatches.itemByName("None");
+        story.characters[idx].baselineShift = -e.depth * sc;   // TeX baseline on the text baseline
+        para.leading = Math.max(12, e.height * sc + 3);
+        para.spaceAfter = CFG.paragraphSpacing + Math.max(0, e.depth * sc - 3);
+        n++;
+    }
+    app.findGrepPreferences = NothingEnum.NOTHING;
+    if (n) LOG.push("Equations: " + n + " typeset with TeX in " + CFG.font + ".");
+}
+placeEquations();
 flow();
 
 // ---------------------------------------------------------------------------
@@ -526,7 +606,7 @@ for (var pf = 0; pf < PLACED.length; pf++) {
 // Supplement: replace [[FIG:n]] / [[TABLE:n]] placeholders with pictures and tables
 // ---------------------------------------------------------------------------
 function buildSupplement() {
-    var tb = textBox(doc.pages[0]), W = tb[3] - tb[1];
+    var tb = textBox(doc.pages[0]), W = tb[3] - tb[1], CW = (W - CFG.gutter) / 2;
     var maxH = tb[2] - tb[0];   // a whole page; siFigure subtracts the caption's height
     for (var guard = 0; guard < 500; guard++) {
         app.findGrepPreferences = NothingEnum.NOTHING;
@@ -539,14 +619,19 @@ function buildSupplement() {
         var ip = para.insertionPoints[0];
         if (m[1] == "FIG") siFigure(ip, M.si_figures[+m[2]], W, maxH);
         else {
-            siTable(ip, M.tables[+m[2]], W);
+            var t = M.tables[+m[2]];
+            siTable(ip, t, t.wide ? W : CW);
             flow();
-            keepCaptionWithTable(para);
+            keepTableWithCaption(para, t.wide, CW);
         }
         flow();
     }
     app.findGrepPreferences = NothingEnum.NOTHING;
-    doc.sections[0].properties = { sectionPrefix: "S", includeSectionPrefix: true };
+    if (START_PAGE > 0)   // continue the main paper's page numbers
+        doc.sections[0].properties = { continueNumbering: false, pageNumberStart: START_PAGE,
+                                       includeSectionPrefix: false };
+    else
+        doc.sections[0].properties = { sectionPrefix: "S", includeSectionPrefix: true };
     LOG.push("Supplement: " + M.si_figures.length + " figures, " + M.tables.length + " tables");
 }
 
@@ -571,18 +656,16 @@ function captionHeight(para, W) {
 
 // Full caption width if figure + caption still fit on one page; otherwise as large as
 // fits. (Pictures may be enlarged to reach the caption width.)
-// If a table starts on a later page than its caption, move the caption there too.
-function keepCaptionWithTable(tablePara) {
-    var cap = null, p = tablePara;
-    for (var guard = 0; guard < 4; guard++) {
-        p = story.paragraphs.previousItem(p);
-        if (!p || !p.isValid) break;
-        var nm = p.appliedParagraphStyle.name;
-        if (nm != "TableCaption" && nm != "TableTitle" && nm != "TableLegend") break;
-        cap = p;
-    }
-    if (cap && pageOf(cap) >= 0 && pageOf(tablePara) > pageOf(cap)) {
-        cap.startParagraph = StartParagraph.NEXT_FRAME;
+// The caption sits below its table. If it ends up in a later column or page, the
+// table moves there too, so they stay together.
+function keepTableWithCaption(tablePara, wide, CW) {
+    var cap = story.paragraphs.nextItem(tablePara);
+    if (!cap || !cap.isValid || !/^TableCaption/.test(cap.appliedParagraphStyle.name)) return;
+    var pt = pageOf(tablePara), pc = pageOf(cap);
+    var dx = Math.abs(cap.insertionPoints[0].horizontalOffset -
+                      tablePara.insertionPoints[0].horizontalOffset);
+    if (pt >= 0 && pc >= 0 && (pc > pt || (!wide && dx > CW / 2))) {
+        tablePara.startParagraph = wide ? StartParagraph.NEXT_FRAME : StartParagraph.NEXT_COLUMN;
         flow();
     }
 }
@@ -590,7 +673,13 @@ function keepCaptionWithTable(tablePara) {
 function siFigure(ip, fig, W, maxH) {
     app.pdfPlacePreferences.pdfCrop = PDFCrop.CROP_PDF;
     var para = ip.paragraphs[0];
-    var room = maxH - captionHeight(para, W) - 16 - 6 - 8;   // figure space before/after + slack
+    // room below where the figure starts (e.g. under a section header); a whole page if
+    // that's too little, since the figure then moves on with its caption
+    var tb = textBox(doc.pages[0]), y0 = tb[0];
+    if (para.parentTextFrames.length && para.lines.length) y0 = para.lines[0].baseline - 12;
+    var capH = captionHeight(para, W);
+    var room = tb[2] - y0 - capH - 6 - 6 - 8;
+    if (room < (maxH - capH) * 0.4) room = maxH - capH - 20;
     var g = ip.place(File(fig.file))[0], rect = g.parent;
     var crop = fig.crop || [0, 0, 1, 1], gb = g.geometricBounds;
     var fullW = gb[3] - gb[1], fullH = gb[2] - gb[0];
@@ -681,7 +770,7 @@ doc.recompose();
 // with its first lines (leaving more than a line empty), the gap is shared out between
 // that column's ordinary paragraphs only, so headings keep exactly their usual spacing.
 // Columns with the normal under-one-line remainder are left alone.
-var FILLABLE = { "Body": 1, "BodyTight": 1, "Equation": 1, "Reference": 1 };
+var FILLABLE = { "Body": 1, "BodyTight": 1, "Equation": 1, "EquationTeX": 1, "Reference": 1 };
 function fillColumnGaps() {
     var conts = story.textContainers, filled = 0;
     for (var k = 0; k < conts.length - 1; k++) {          // the story's last frame stays as is
@@ -766,6 +855,16 @@ for (var li = 0; li < ladder.length; li++) {
         LOG.push("Export with " + (L ? L[0] + "/" + L[1] + " ppi" : "no downsampling") + " failed (" + e.message + "); trying gentler settings.");
         if (!L) throw e;
     }
+}
+if (CFG.embedFigures) {
+    var embedded = 0, failed = [];
+    for (var k = doc.links.length - 1; k >= 0; k--) {
+        var lk = doc.links[k];
+        if (lk.status == LinkStatus.LINK_EMBEDDED) continue;
+        try { lk.unlink(); embedded++; } catch (e) { failed.push(lk.name + " (" + e.message + ")"); }
+    }
+    LOG.push("Embedded " + embedded + " figure file(s) in the .indd" +
+             (failed.length ? "; could not embed: " + failed.join(", ") : ""));
 }
 doc.save(File(OUTPDF.fsName.replace(/\.pdf$/i, "") + ".indd"));
 LOG.push("pages: " + doc.pages.length);

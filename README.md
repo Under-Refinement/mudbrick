@@ -9,6 +9,8 @@ mudbrick docx2pdf paper.docx
 ```
 
 The layout is done by InDesign, so an editable `.indd` file is saved alongside the PDF.
+All figures are embedded in it, so it can be shared and opened on any computer
+without the original figure files.
 
 ## Setup
 
@@ -23,7 +25,8 @@ ln -s "$PWD/bin/mudbrick" /opt/homebrew/bin/mudbrick   # or any folder on your P
 mudbrick --help                                        # check that it works
 ```
 
-Nothing else needs to be installed. On the first run, macOS asks whether Terminal may
+For beautifully typeset equations, a TeX engine is also needed:
+`brew install tectonic`. Nothing else needs to be installed. On the first run, macOS asks whether Terminal may
 control InDesign; this must be allowed.
 
 ## Making a preprint
@@ -115,22 +118,36 @@ mudbrick docx2pdf paper.docx --no-supplement                # or skipped
 
 The supplement file should be set up like this:
 
+- **Movies:** a caption starting `Supplementary Movie 1.` (or `Movie S1.`) for each.
 - **Figures:** each caption starts with `Supplementary Figure 1.` The figure comes from a
   matching file in the `-f` folder (`supp_figure_1/`, `figure_S1/`, `Supp_Fig1.ai`, or
   `figure_1/` inside a `supplementary/` folder). If there is no file, the picture pasted
   directly above the caption is used. The two can be mixed.
-- **Tables:** normal Word tables, with the caption right above each one, starting
-  `Supplementary Table 1.` Column headings should be bold. A bold row that spans the whole
+- **Tables:** normal Word tables, each with a caption starting `Supplementary Table 1.`
+  (above or below the table in Word). Column headings should be bold. A bold row that spans the whole
   table (like "Overall performance") becomes a grey section band.
 
-The title, authors and affiliations in the supplement's header are taken from the
-manuscript, so they don't need to be repeated.
+The supplement is laid out like a journal supplement:
+
+- **A cover page:** "Supplementary Information" above the paper's title, authors and
+  affiliations, all taken from the manuscript.
+- **Sections:** SUPPLEMENTARY MOVIES, TABLES and FIGURES, each starting on a new page
+  (only those that exist).
+- **Tables** sit in the two-column grid with the caption below. Narrow tables take one
+  column and wide ones span both.
+- **Figures** come one per page, with the caption below.
+- **Page numbers** continue from the main preprint (if it is 14 pages, the supplement
+  starts at 15). With `--supplement-only` and no preprint built yet, pages are numbered
+  S1, S2, … instead.
+- **Labels** follow how the manuscript cites the supplement: "Figure S1." if the text says
+  "Figure S1", or "Supplementary Figure 1." if it says "Supplementary Figure 1".
 
 ## How the manuscript should be written
 
 - Start with the title, then the authors, then affiliations and correspondence.
 - Add `Keywords: …` and `Running title: …` after that. The running title goes in the footer.
-  Without one, the footer uses the title, cut off with "…" if it's too long.
+  Without one, the footer uses the full title, on two lines if needed (cut off with "…"
+  only if even two lines aren't enough).
 - Section headings are **bold ALL CAPS** (ABSTRACT, INTRODUCTION, …).
 - Subheadings are paragraphs that are entirely bold.
 - Each caption starts with `Figure 1.` and a bold title, followed by the panels:
@@ -146,7 +163,8 @@ manuscript, so they don't need to be repeated.
   caption continues on the next page if needed.
 - **Spacing** between paragraphs and above headings is the same everywhere, and a heading
   always stays with its text.
-- **Equations** on their own line are centered.
+- **Equations** made with Word's equation editor are typeset with TeX in Myriad Pro,
+  centred, with the equation number on the right (this needs `brew install tectonic`).
 - **The title page** tightens up to fit a long title or abstract, and keywords always stay on
   page 1.
 - **Data availability, author contributions** and similar sections are moved after the

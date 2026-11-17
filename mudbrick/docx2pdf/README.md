@@ -16,6 +16,10 @@ mudbrick docx2pdf manuscript.docx --dry-run    # check parsing, figures and warn
 * `-o` defaults to `manuscript_preprint.pdf`, saved next to the .docx file. An `.indd`
   file with the same name is saved alongside it, and so is
   `manuscript_figure_legends.docx`.
+* Every figure (`.ai`, `.pdf` or picture) is embedded in the saved `.indd`, so the file
+  can be opened and edited on another computer without the figure files. The `.indd`
+  is therefore about as large as all the figure files together. Set `embedFigures:
+  false` in `layout.jsx` to keep linked figures instead.
 * InDesign has to be installed. The first time you run it, macOS asks you to let
   Terminal control InDesign; allow it.
 
@@ -41,10 +45,11 @@ as a last resort no downsampling) and reports which setting it used.
 
 * The title is the first paragraph and the author line is the second. They are
   followed by the affiliations and notes (`*Equal contributions`, `✉…`).
-* The footer shows the running title. If the manuscript gives none, the footer uses
-  the full title when it fits on one line. Otherwise the title is cut at a word
-  boundary and ends with "…", measured so it never wraps or runs into the page
-  number. A warning suggests adding a `Running title:`.
+* The footer shows the running title, set a little below the footer rule. If the
+  manuscript gives none, the footer uses the full title, wrapping onto a second
+  (balanced) line when needed. Only a title too long for two lines is cut at a word
+  boundary and ended with "…", so it never runs into the page number. A warning
+  suggests adding a `Running title:`.
 * `Keywords:` and `Running title:` can be written inline (`Keywords: a, b`) or as a
   heading with the content in the paragraphs below. If there are several
   running-title candidates, the first one is used. Empty keywords are left out.
@@ -89,32 +94,41 @@ would print sharper.
 ### Supplementary information
 
 A `.docx` next to the manuscript whose name contains "supp", "supplement" or "SI"
-becomes a second PDF, `<manuscript>_supplement.pdf`, with an `.indd` alongside it. It
-has a "Supplementary Information" header with the paper's title and authors (plus the
-affiliations and correspondence line, set small, whenever the main title page has them), and is
-laid out in one column:
-* each supplementary figure with its caption below, always on the same page. If they
-  don't both fit in the space left, they move together to the next page. A figure
-  grows to the full caption width, even past its original size, as long as the figure
-  and its caption still fit on one page. Otherwise it is made as large as fits.
-* each table as a real InDesign table, with its caption above, in a minimal style:
-  a rule above and below the table and under each row of column headings, and no
-  other lines. A row that spans the whole table and is bold (e.g. "Overall
-  performance") becomes a light grey section band.
-  A table that fits on one page is never split: if it doesn't fit in the space left,
-  it moves to the next page together with its caption. Only tables taller than a page
-  break, and they repeat their header row on each page. Merged cells and Word's
-  column widths are kept, and a bold first row repeats as a header when the table
-  breaks across pages.
+becomes a second PDF, `<manuscript>_supplement.pdf`, with an `.indd` alongside it. Its
+layout follows a journal-style supplement:
 
-In the supplement, each caption's bold title runs straight into its text in one
-paragraph ("**Supplementary Figure 2. Title.** (left) …"). Set
-`"supplement_title_inline": false` to give the title its own line, as the main
-paper's figures have.
-Captions are normalized to `Supplementary Figure N.` and `Supplementary Table N.`,
-whatever the original wording ("Table 1:", "Supplementary Figure. 5."). Pages are
-numbered S1, S2, … Use `--supplement FILE` to pick the supplement file yourself,
-`--no-supplement` to skip it, or `--supplement-only` to make only the supplement.
+* **Cover page:** "Supplementary Information" above the main paper's title, authors,
+  affiliations and correspondence.
+* **Sections:** SUPPLEMENTARY MOVIES, SUPPLEMENTARY TABLES and SUPPLEMENTARY FIGURES
+  (setting `supplement_order`), each starting a new page under a red header. Only
+  sections with content appear.
+* **Movies:** each legend at full width.
+* **Tables:**
+  * Real InDesign tables in the two-column grid, with the caption below the table. A
+    table that Word sized narrower than a column takes one column; wider tables span both
+    (setting `supplement_table_columns`).
+  * The style is minimal: rules above and below the table and under each row of column
+    headings, and no other lines. A bold row spanning the table (e.g. "Overall
+    performance") becomes a light grey band.
+  * Merged cells and Word's column widths are kept, and a bold first row repeats as the
+    header when a table has to break.
+  * A table that fits on a page is never split, and stays with its caption. A note
+    paragraph after a table is kept with it.
+* **Figures:**
+  * One per page (setting `supplement_figure_per_page`), with the caption below on the
+    same page.
+  * A figure grows to the full width when figure and caption still fit; otherwise it is
+    made as large as fits.
+  * The caption's bold title runs into its text (setting `supplement_title_inline`).
+* **Page numbers** continue from the main PDF (setting `supplement_page_numbers`:
+  `"continue"` or `"S"`). When the main PDF's page count is unknown, pages are numbered
+  S1, S2, …
+* **Labels** follow the manuscript's citation style: `Figure S1.` / `Table S1.` /
+  `Movie S1.` when the text cites "Figure S1", otherwise `Supplementary Figure 1.` and so
+  on. Odd original wording ("Table 1:", "Supplementary Figure. 5.") is normalized.
+
+Use `--supplement FILE` to pick the supplement file yourself, `--no-supplement` to skip
+it, or `--supplement-only` to make only the supplement.
 
 A supplementary figure comes from a file in the figure folder if one matches:
 `supp_figure_1/`, `figure_S1/`, `Supp_Fig1.ai`, `FigS1.ai`, or `figure_1/` inside a
@@ -163,9 +177,15 @@ a missing legend, notes like `[jhd stopped here]`, or several running titles.
   under "Figure N (continued from prior page)."
 * Figures have no border. Use `--figure-border`, or `"figure_border": true` in a
   settings file, to draw a thin 0.5 pt border around every figure in both PDFs.
-* Stand-alone equations are centered on their own line. This covers Word equation
-  objects, and short lines with "=" and almost no ordinary words, e.g.
-  `L = λdice Ldice + λfocal Lfocal`. Sub- and superscripts are kept.
+* Stand-alone Word equations (made with Insert → Equation, on their own line,
+  optionally followed by a number such as `(1)`) are converted to LaTeX and typeset
+  with TeX, in Myriad Pro: letters, digits and Greek come from the body font, and only
+  the symbols it lacks (large sums, integrals, fraction rules) from Fira Math. Each
+  equation is placed as a vector graphic, centred in the column on the text baseline,
+  with its number flush right. This needs a TeX engine: `brew install tectonic` (or an
+  installed TeX Live with XeLaTeX). Without one, or with `"typeset_equations": false`,
+  equations stay as centred text, as do equations typed as plain text (short lines
+  with "=" and almost no ordinary words). Equations inside a sentence stay as text.
 * Captions (figure and table titles and legends) are justified, like the body text.
   Manual line breaks inside a caption become spaces, so no justified line gets
   stretched. Bold position labels such as **(left)**, **(right)**, **(top)** and

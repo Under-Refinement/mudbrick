@@ -276,5 +276,47 @@ class Docx2PdfThreeDocuments(unittest.TestCase):
         self.assertIn("Supplementary Table 1.", si)
         self.assertLess(si.index("[[FIG:0]]"), si.index("Supplementary Figure 1."))
         self.assertNotIn("<pstyle:LegendTitle>", si)   # title runs into the caption text
-        self.assertIn("<pstyle:SIAffil>1. Department of Biology", si)  # same as main title page
+        with open(os.path.join(self.build, "cover.txt")) as fh:
+            cover = fh.read()
+        self.assertIn("<pstyle:SICoverHead>Supplementary Information", cover)
+        self.assertIn("<pstyle:AffilFirst>1. Department of Biology", cover)  # same as main title page
+        self.assertLess(si.index("[[TABLE:0]]"), si.index("Supplementary Table 1."))  # caption below
+        self.assertLess(si.index("SUPPLEMENTARY TABLES"), si.index("SUPPLEMENTARY FIGURES"))
         self.assertIn("<pstyle:SICaption><cstyle:cs_sb>Supplementary Figure 1.", si)
+
+    def test_supplement_labels_follow_manuscript_citations(self):
+        cite = lambda text: [{"runs": [(text, {})]}]
+        self.assertEqual(convert.supplement_label_style(cite("as in Figure S2 and Table S1")), "S")
+        self.assertEqual(convert.supplement_label_style(cite("see Supplementary Figure 2")), "long")
+        self.assertEqual(convert.supplement_label("Table", 3, "S"), "Table S3.")
+
+
+class Equations(unittest.TestCase):
+    """Word equations (OMML) -> LaTeX; no TeX engine needed."""
+    MNS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+
+    def tex(self, inner):
+        import xml.etree.ElementTree as ET
+        from mudbrick.docx2pdf import equations
+        el = ET.fromstring('<m:oMath xmlns:m="%s" %s>%s</m:oMath>' % (self.MNS, NS, inner))
+        return equations.omml_to_tex(el)
+
+    @staticmethod
+    def r(t):
+        return "<m:r><m:t>%s</m:t></m:r>" % t
+
+    def test_subscripts_fractions_sums(self):
+        r = self.r
+        eq = ("<m:sSub><m:e>%s</m:e><m:sub>%s</m:sub></m:sSub>%s"
+              "<m:f><m:num>%s</m:num><m:den>%s</m:den></m:f>"
+              '<m:nary><m:naryPr><m:chr m:val="∑"/><m:limLoc m:val="undOvr"/>'
+              '<m:supHide m:val="1"/></m:naryPr><m:sub>%s</m:sub><m:sup/><m:e>%s</m:e></m:nary>'
+              % (r("L"), r("focal"), r("=-"), r("1"), r("N"), r("i"), r("log")))
+        self.assertEqual(self.tex(eq),
+                         "{L}_{\\mathrm{focal}}=−\\frac{1}{N}\\sum\\limits_{i}{\\log }")
+
+    def test_delimiters_and_tracked_deletions(self):
+        r = self.r
+        eq = ('<m:d><m:dPr><m:begChr m:val="["/><m:endChr m:val="]"/></m:dPr>'
+              "<m:e>%s</m:e></m:d><m:r><w:del><m:t>x</m:t></w:del></m:r>" % r("a+b"))
+        self.assertEqual(self.tex(eq), "\\left[ a+b \\right]")

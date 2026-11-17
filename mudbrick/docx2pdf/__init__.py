@@ -13,7 +13,9 @@ See mudbrick/docx2pdf/README.md for the conventions.
 """
 import json
 import os
+import re
 import shutil
+import subprocess
 import tempfile
 
 from .. import adobe
@@ -45,6 +47,16 @@ def add_arguments(p):
                    help="only read the manuscript and figures and report; don't run InDesign")
     p.add_argument("--keep-build", action="store_true",
                    help="keep the intermediate tagged-text folder and print its path")
+
+
+def pdf_page_count(path):
+    """Pages in an existing PDF (via Spotlight metadata), or None."""
+    try:
+        out = subprocess.run(["mdls", "-raw", "-name", "kMDItemNumberOfPages", path],
+                             capture_output=True, text=True).stdout.strip()
+        return int(out)
+    except (OSError, ValueError):
+        return None
 
 
 def run(args):
@@ -93,14 +105,26 @@ def run(args):
         if args.dry_run:
             return 0
         os.makedirs(os.path.dirname(out), exist_ok=True)
+        main_pages = None
         if not args.supplement_only:
             print("laying out in InDesign ...", flush=True)
-            print(adobe.run_jsx("indesign", LAYOUT, [build, out]))
+            log = adobe.run_jsx("indesign", LAYOUT, [build, out])
+            print(log)
             print("PDF:      " + out)
             print("InDesign: " + os.path.splitext(out)[0] + ".indd")
+            m = re.search(r"pages: (\d+)", log)
+            main_pages = int(m.group(1)) if m else None
+        elif os.path.exists(out):
+            main_pages = pdf_page_count(out)
         if smanifest:
+            start = 0
+            if cfg["supplement_page_numbers"] == "continue":
+                if main_pages:
+                    start = main_pages + 1
+                else:
+                    print("note: main PDF page count unknown; supplement pages numbered S1, S2, ...")
             print("laying out the supplement in InDesign ...", flush=True)
-            print(adobe.run_jsx("indesign", LAYOUT, [supp_build, supp_out]))
+            print(adobe.run_jsx("indesign", LAYOUT, [supp_build, supp_out, start]))
             print("PDF:      " + supp_out)
             print("InDesign: " + os.path.splitext(supp_out)[0] + ".indd")
         return 0
