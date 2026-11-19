@@ -65,8 +65,6 @@ DEFAULT_CONFIG = {
     # notes). Default: a .docx whose name starts with "Table", next to the manuscript or
     # in the figure folder. When there is one, tables in the supplement file are ignored.
     "supplement_tables_docx": None,
-    # Each supplementary figure starts on a new page.
-    "supplement_figure_per_page": True,
     # Tables narrower than a column sit in one column; wider ones span both.
     "supplement_table_columns": True,
     # Supplement page numbers: "prefix" (SI-1, SI-2, ... with supplement_page_prefix) or
@@ -1284,7 +1282,8 @@ def find_tables_docx(docx_path, fig_dir=None):
 
 def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, fig_dir=None):
     """Supplementary .docx -> cover.txt (cover page) + si.txt (a two-column story with
-    [[FIG:n]] / [[TABLE:n]] placeholders, in sections: movies, tables, figures) +
+    [[TABLE:n]] placeholders and a [[FIGPAGES]] marker where the figure pages go;
+    each figure's legend is its own si_legend_N.txt) +
     manifest.json for layout.jsx's supplement mode."""
     global ITALIC_ET_AL, LEGEND_INLINE
     del WARNINGS[:]
@@ -1371,7 +1370,10 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, 
     tg = Tagged()
     figures, tables = [], []
 
-    def caption(runs, style_inline, style_title, style_text):
+    legend_cstyles = set()
+
+    def caption(runs, style_inline, style_title, style_text, out=None):
+        out = out or tg
         legend = normalize_legend([runs])
         if cfg["supplement_title_inline"]:
             merged = []
@@ -1383,13 +1385,24 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, 
         else:
             legend = [(style_title if st == "LegendTitle" else style_text, r) for st, r in legend]
         for st, r in legend:
-            tg.para(st, r, bold_flag="sb")
+            out.para(st, r, bold_flag="sb")
 
     for section in cfg["supplement_order"]:
         group = sorted(items[section], key=lambda x: x["num"])
         if not group:
             continue
-        tg.para("SISection", [(SECTION_TITLE[section], {})])
+        if section == "figures":
+            # Figures get pages of their own, inserted here by layout.jsx: on each, the
+            # figure and its legend are separate frames (the legend is not part of this
+            # story), so they can be moved independently. The section heading is a frame
+            # of its own on the first figure page.
+            head = Tagged()
+            head.para("SISection", [(SECTION_TITLE[section], {})])
+            head.write(os.path.join(out_dir, "si_figures_head.txt"))
+            legend_cstyles.update(head.cstyles)
+            tg.para("SIFigurePages", [("[[FIGPAGES]]", {})])
+        else:
+            tg.para("SISection", [(SECTION_TITLE[section], {})])
         for k, item in enumerate(group):
             if section == "movies":
                 caption(item["caption"], "SIMovie", "SIMovieTitle", "SIMovie")
@@ -1408,11 +1421,14 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, 
                 for nb in item["notes"]:
                     tg.para("SINote" + sfx, nb["runs"])
             elif "file" in item:
-                first = k == 0
-                tg.para("SIFigure" if first or not cfg["supplement_figure_per_page"]
-                        else "SIFigureNewPage", [("[[FIG:%d]]" % len(figures), {})])
-                figures.append({x: item[x] for x in ("num", "file", "px", "crop", "source")})
-                caption(item["caption"], "SICaption", "SICaptionTitle", "SICaption")
+                lg = Tagged()
+                caption(item["caption"], "SICaption", "SICaptionTitle", "SICaption", out=lg)
+                name = "si_legend_%d.txt" % item["num"]
+                lg.write(os.path.join(out_dir, name))
+                legend_cstyles.update(lg.cstyles)
+                fig = {x: item[x] for x in ("num", "file", "px", "crop", "source")}
+                fig["legend"] = name
+                figures.append(fig)
     tg.write(os.path.join(out_dir, "si.txt"))
     manifest = {"mode": "supplement", "running_title": running_title,
                 "figure_border": cfg["figure_border"],
@@ -1420,7 +1436,7 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, 
                 "embed_figures": cfg["embed_figures"],
                 "figures": [], "si_figures": figures, "tables": tables,
                 "movies": len(items["movies"]), "label_style": style,
-                "cstyles": sorted(tg.cstyles | cover.cstyles | {"cs_sb_i"}),
+                "cstyles": sorted(tg.cstyles | cover.cstyles | legend_cstyles | {"cs_sb_i"}),
                 "missing_glyphs": sorted("U+%04X" % ord(c) for c in tg.missing | cover.missing),
                 "warnings": WARNINGS}
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:

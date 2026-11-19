@@ -272,17 +272,23 @@ class Docx2PdfThreeDocuments(unittest.TestCase):
         self.assertEqual(m["tables"][0]["rows"][0][0]["span"], 2)
         with open(os.path.join(self.build, "si.txt")) as fh:
             si = fh.read()
-        self.assertIn("Supplementary Figure 1.", si)
+        # figures get their own pages; each legend is a separate frame, not in the story
+        self.assertIn("[[FIGPAGES]]", si)
+        self.assertNotIn("Supplementary Figure 1.", si)
+        self.assertEqual(m["si_figures"][0]["legend"], "si_legend_1.txt")
+        with open(os.path.join(self.build, "si_legend_1.txt")) as fh:
+            legend = fh.read()
+        with open(os.path.join(self.build, "si_figures_head.txt")) as fh:
+            self.assertIn("SUPPLEMENTARY FIGURES", fh.read())
         self.assertIn("Supplementary Table 1.", si)
-        self.assertLess(si.index("[[FIG:0]]"), si.index("Supplementary Figure 1."))
-        self.assertNotIn("<pstyle:LegendTitle>", si)   # title runs into the caption text
+        self.assertNotIn("<pstyle:LegendTitle>", legend)   # title runs into the caption text
         with open(os.path.join(self.build, "cover.txt")) as fh:
             cover = fh.read()
         self.assertIn("<pstyle:SICoverHead>Supplementary Information", cover)
         self.assertIn("<pstyle:AffilFirst>1. Department of Biology", cover)  # same as main title page
         self.assertLess(si.index("[[TABLE:0]]"), si.index("Supplementary Table 1."))  # caption below
-        self.assertLess(si.index("SUPPLEMENTARY FIGURES"), si.index("SUPPLEMENTARY TABLES"))  # tables last
-        self.assertIn("<pstyle:SICaption><cstyle:cs_sb>Supplementary Figure 1.", si)
+        self.assertLess(si.index("[[FIGPAGES]]"), si.index("SUPPLEMENTARY TABLES"))  # tables last
+        self.assertIn("<pstyle:SICaption><cstyle:cs_sb>Supplementary Figure 1.", legend)
 
     def test_supplement_tables_from_their_own_file(self):
         supp = convert.find_supplement_docx(self.docx)

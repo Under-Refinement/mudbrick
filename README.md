@@ -137,7 +137,8 @@ The supplement is laid out like a journal supplement:
   (only those that exist).
 - **Tables** sit in the two-column grid with the caption below. Narrow tables take one
   column and wide ones span both.
-- **Figures** come one per page, with the caption below.
+- **Figures** come one per page, with the caption below; figure and caption are separate
+  frames, so each can be moved on its own in InDesign.
 - **Page numbers** are SI-1, SI-2, … To continue from the main preprint instead (if it
   is 14 pages, the supplement starts at 15), set `"supplement_page_numbers": "continue"`
   in a settings file.

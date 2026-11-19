@@ -122,12 +122,13 @@ layout follows a journal-style supplement:
   * A table that fits on a page is never split, and stays with its caption. A note
     paragraph after a table is kept with it.
 * **Figures:**
-  * One per page (setting `supplement_figure_per_page`), with the caption below on the
-    same page.
+  * One per page. The figure and its legend are separate, unlinked frames (the legend
+    is not part of the supplement's text flow), so either can be moved or resized by
+    hand in InDesign. The section heading is a frame of its own on the first figure page.
   * A figure is placed at 100% of its size (never scaled, so its font sizes stay as
-    drawn), trimmed to its artwork and centred on the text column. If it is wider than
-    the column or taller than the room above its caption, it overprints the margins (or
-    the caption) and a warning says by how much.
+    drawn), trimmed to its artwork and centred at the top of the page, with its legend
+    right below. If it is wider than the column or too tall to fit with its legend, it
+    overprints the margins (or the legend) and a warning says by how much.
   * The caption's bold title runs into its text (setting `supplement_title_inline`).
 * **Page numbers** are SI-1, SI-2, … (setting `supplement_page_prefix`). With
   `"supplement_page_numbers": "continue"` they continue from the main PDF instead (and

@@ -183,12 +183,8 @@ pstyle("SIMovieTitle", span({ fontStyle: SEMIBOLD, pointSize: 9, leading: 10.8, 
                               keepWithNext: 2, keepAllLinesTogether: true }));
 pstyle("SIMovie",    span({ pointSize: 9, leading: 10.8, justification: J, spaceAfter: 8,
                             keepAllLinesTogether: true }));
-// A supplementary figure and its caption stay on one page: the figure keeps with the
-// caption, and the caption is never split.
-pstyle("SIFigure",   span({ justification: C, leading: Leading.AUTO, spaceBefore: 6, spaceAfter: 6,
-                            keepWithNext: 1 }));
-pstyle("SIFigureNewPage", span({ justification: C, leading: Leading.AUTO, spaceAfter: 6,
-                                 keepWithNext: 1, startParagraph: StartParagraph.NEXT_PAGE }));
+// Marks where the supplementary figure pages go (replaced by buildFigurePages()).
+pstyle("SIFigurePages", span({}));
 pstyle("SICaption",  span({ pointSize: 9, leading: 10.8, spaceBefore: 2, spaceAfter: 12,
                             justification: J, keepAllLinesTogether: true }));
 pstyle("SICaptionTitle", span({ fontStyle: SEMIBOLD, pointSize: 9, leading: 10.8, justification: J,
@@ -675,29 +671,32 @@ for (var pf = 0; pf < PLACED.length; pf++) {
 // Supplement: replace [[FIG:n]] / [[TABLE:n]] placeholders with pictures and tables
 // ---------------------------------------------------------------------------
 function buildSupplement() {
-    SI_PLACED = [];
     var tb = textBox(doc.pages[0]), W = tb[3] - tb[1], CW = (W - CFG.gutter) / 2;
-    var maxH = tb[2] - tb[0];   // a whole page; siFigure subtracts the caption's height
+    var figuresFirst = /^\[\[FIGPAGES\]\]/.test(story.contents);
+    if (figuresFirst) buildFigurePages();   // before the tables, so they flow on final pages
     for (var guard = 0; guard < 500; guard++) {
         app.findGrepPreferences = NothingEnum.NOTHING;
-        app.findGrepPreferences.findWhat = "\\[\\[(FIG|TABLE):\\d+\\]\\]";
+        app.findGrepPreferences.findWhat = "\\[\\[TABLE:\\d+\\]\\]";
         var hits = story.findGrep();
         if (!hits.length) break;
-        var hit = hits[0], m = hit.contents.match(/(FIG|TABLE):(\d+)/);
+        var hit = hits[0], m = hit.contents.match(/TABLE:(\d+)/);
         var para = hit.paragraphs[0];
         hit.remove();
-        var ip = para.insertionPoints[0];
-        if (m[1] == "FIG") siFigure(ip, M.si_figures[+m[2]], W, maxH);
-        else {
-            var t = M.tables[+m[2]];
-            siTable(ip, t, t.wide ? W : CW);
-            flow();
-            keepTableWithCaption(para, t.wide, CW);
-        }
+        var t = M.tables[+m[1]];
+        siTable(para.insertionPoints[0], t, t.wide ? W : CW);
+        flow();
+        keepTableWithCaption(para, t.wide, CW);
         flow();
     }
     app.findGrepPreferences = NothingEnum.NOTHING;
-    placeSIFigures();
+    if (!figuresFirst) buildFigurePages();
+    // story pages left empty at the end (e.g. the marker's old page) are removed
+    doc.recompose();
+    for (var e = story.textContainers.length - 1; e > 0; e--) {
+        var c = story.textContainers[e];
+        if (c.characters.length || !c.parentPage || c.parentPage.allPageItems.length > 1) break;
+        c.parentPage.remove();
+    }
     if (START_PAGE > 0)   // continue the main paper's page numbers
         doc.sections[0].properties = { continueNumbering: false, pageNumberStart: START_PAGE,
                                        includeSectionPrefix: false };
@@ -741,71 +740,102 @@ function keepTableWithCaption(tablePara, wide, CW) {
     }
 }
 
-// Supplementary figures are never resized (that would change their font sizes). The
-// text only reserves their space with an empty inline frame; once the layout is final,
-// placeSIFigures() puts each figure at 100 % on its page, centred on the text column over
-// that space. A figure larger than the space overprints the margins or its caption.
-// (Placing them inline instead makes InDesign drop the artwork of a figure whose
-// paragraph is later pushed to a new page, and cannot let a figure overhang the text.)
-var SI_PLACED = [];   // reset in buildSupplement(), which runs before this line
-
-function siFigure(ip, fig, W, maxH) {
+// Supplementary figures get pages of their own. On each page the figure and its legend
+// are separate, unlinked frames (the legend is not part of the supplement's story), so
+// either can be moved or resized by hand. The figure is never scaled (that would change
+// its font sizes): trimmed to its artwork, centred on the text column at the top of the
+// page, with the legend right below it. A figure too big for the page overprints the
+// margins or its legend, with a warning saying by how much.
+function siFigurePage(page, fig, first) {
+    var tb = textBox(page), W = tb[3] - tb[1], y = tb[0], n = fig.num;
+    if (first) {   // section heading, a frame of its own
+        var hf = page.textFrames.add({ geometricBounds: [y, tb[1], y + 60, tb[3]] });
+        hf.place(File(BUILD + "/si_figures_head.txt"));
+        hf.paragraphs.everyItem().startParagraph = StartParagraph.ANYWHERE;
+        doc.recompose();
+        var hh = usedHeight(hf);
+        hf.geometricBounds = [y, tb[1], y + hh, tb[3]];
+        y += hh + 6;
+    }
     app.pdfPlacePreferences.pdfCrop = PDFCrop.CROP_PDF;
     app.pdfPlacePreferences.transparentBackground = true;
-    var para = ip.paragraphs[0];
-    var capH = captionHeight(para, W);
-    // natural size of the artwork, trimmed to its content
-    var tmp = doc.pages[0].rectangles.add({ geometricBounds: [0, 0, 10, 10] });
+    var tmp = page.rectangles.add({ geometricBounds: [0, 0, 10, 10] });   // natural size
     var gb = tmp.place(File(fig.file))[0].geometricBounds;
     tmp.remove();
     var crop = fig.crop || [0, 0, 1, 1];
     var fullW = gb[3] - gb[1], fullH = gb[2] - gb[0];
     var natW = fullW * (crop[2] - crop[0]), natH = fullH * (crop[3] - crop[1]);
-    var maxRoom = Math.max(72, maxH - capH - 20);   // most a page can hold above the caption
-    var spacer = ip.rectangles.add({ geometricBounds: [0, 0, 10, 10] });
-    var rb = spacer.geometricBounds;
-    spacer.geometricBounds = [rb[0], rb[1], rb[0] + Math.min(natH, maxRoom), rb[1] + Math.min(natW, W)];
-    spacer.strokeWeight = 0;
-    spacer.strokeColor = doc.swatches.itemByName("None");
-    spacer.fillColor = doc.swatches.itemByName("None");
-    SI_PLACED.push({ spacer: spacer, fig: fig, crop: crop, fullW: fullW, fullH: fullH,
-                     natW: natW, natH: natH, W: W });
+
+    var lf = legendFrame(page, tb, tb[2] - tb[0], File(BUILD + "/" + fig.legend));
+    if (lf.overflows) LOG.push("WARNING: Supplementary Figure " + n + " legend is longer than a page.");
+    var legendH = usedHeight(lf);
+    var figTop = y, legTop = figTop + natH + CFG.figGap;
+    var over = legTop + legendH - tb[2], up = 0;
+    if (over > 0) {   // first use the empty top margin, then run into the legend
+        up = Math.min(over, Math.max(0, figTop - 18));
+        figTop -= up; legTop -= up; over -= up;
+    }
+    if (over > 0) legTop = tb[2] - legendH;
+    lf.geometricBounds = [legTop, tb[1], legTop + legendH, tb[3]];
+
+    var x0 = tb[1] + (W - natW) / 2;
+    var rect = page.rectangles.add({ geometricBounds: [figTop, x0, figTop + natH, x0 + natW] });
+    rect.place(File(fig.file));
+    var ox = -crop[0] * fullW, oy = -crop[1] * fullH;
+    positionGraphic(rect, ox, oy);
+    figureStroke(rect);
+    // the final frame comes from the re-place pass after the layout, as for main figures
+    PLACED.push({ page: page, file: File(fig.file), frame: rect.geometricBounds, ox: ox, oy: oy, rect: rect });
+
+    if (natW > W + 0.5) {
+        var side = (natW - W) / 2;
+        LOG.push("WARNING: Supplementary Figure " + n + " artwork is " + Math.round(natW) + " pt wide, " +
+                 Math.round(natW - W) + " pt wider than the " + Math.round(W) + "-pt text column; it overprints " +
+                 Math.round(side) + " pt into each side margin" +
+                 (side > Math.min(tb[1], CFG.pageW - tb[3]) ? " and runs off the page edge" : "") + ".");
+    }
+    if (up > 0.5 || over > 0.5)
+        LOG.push("WARNING: Supplementary Figure " + n + " artwork is " + Math.round(natH) + " pt tall, " +
+                 Math.round(up + Math.max(0, over)) + " pt more than fits with its legend; it overprints " +
+                 (up > 0.5 ? Math.round(up) + " pt of the top margin" : "") +
+                 (up > 0.5 && over > 0.5 ? " and " : "") +
+                 (over > 0.5 ? Math.round(over) + " pt of its legend" : "") + ".");
 }
 
-function placeSIFigures() {
-    for (var i = 0; i < SI_PLACED.length; i++) {
-        var it = SI_PLACED[i], sp = it.spacer, page = sp.parentPage, n = it.fig.num;
-        if (!page) { LOG.push("WARNING: Supplementary Figure " + n + " did not fit on any page."); continue; }
-        var sb = sp.geometricBounds, tb = textBox(page), W = tb[3] - tb[1];
-        var x0 = tb[1] + (W - it.natW) / 2;
-        var over = it.natH - (sb[2] - sb[0]);
-        // a figure taller than its space first uses the empty top margin, then runs down
-        var up = over > 0 ? Math.min(over, Math.max(0, sb[0] - 18)) : 0;
-        var y0 = sb[0] - up;
-        var rect = page.rectangles.add({ geometricBounds: [y0, x0, y0 + it.natH, x0 + it.natW] });
-        rect.place(File(it.fig.file));
-        var ox = -it.crop[0] * it.fullW, oy = -it.crop[1] * it.fullH;
-        positionGraphic(rect, ox, oy);
-        // the final frame comes from the re-place pass after the layout, as for main figures
-        PLACED.push({ page: page, file: File(it.fig.file), frame: rect.geometricBounds, ox: ox, oy: oy, rect: rect });
-        figureStroke(rect);
-        if (it.natW > W + 0.5) {
-            var side = (it.natW - W) / 2;
-            LOG.push("WARNING: Supplementary Figure " + n + " artwork is " + Math.round(it.natW) +
-                     " pt wide, " + Math.round(it.natW - W) + " pt wider than the " + Math.round(W) +
-                     "-pt text column; it overprints " + Math.round(side) + " pt into each side margin" +
-                     (side > Math.min(tb[1], CFG.pageW - tb[3]) ? " and runs off the page edge" : "") + ".");
-        }
-        if (over > 0.5) {
-            var down = over - up;
-            LOG.push("WARNING: Supplementary Figure " + n + " artwork is " + Math.round(it.natH) +
-                     " pt tall, " + Math.round(over) + " pt more than fits with its caption on page " +
-                     page.name + "; it overprints " +
-                     (up > 0.5 ? Math.round(up) + " pt of the top margin" : "") +
-                     (up > 0.5 && down > 0.5 ? " and " : "") +
-                     (down > 0.5 ? Math.round(down) + " pt of its caption" +
-                      (y0 + it.natH > CFG.footerRule ? " and the page footer" : "") : "") + ".");
-        }
+// Replace the [[FIGPAGES]] marker with one page per supplementary figure. Pages go right
+// before the story page holding the marker if it starts that page, otherwise after it
+// (and the text after the marker then starts on the next story page).
+function buildFigurePages() {
+    app.findGrepPreferences = NothingEnum.NOTHING;
+    app.findGrepPreferences.findWhat = "\\[\\[FIGPAGES\\]\\]";
+    var hits = story.findGrep();
+    app.findGrepPreferences = NothingEnum.NOTHING;
+    if (!hits.length) return;
+    var para = hits[0].paragraphs[0], frames = para.parentTextFrames;
+    var fr = frames.length ? frames[0] : null;
+    var anchor = fr ? fr.parentPage : doc.pages[doc.pages.length - 1];
+    var atStart = !fr || para.index == fr.characters[0].index;
+    var after = story.paragraphs.nextItem(para);
+    para.remove();
+    if (after && after.isValid && !atStart) after.startParagraph = StartParagraph.NEXT_FRAME;
+    var figs = M.si_figures, ref = anchor, loc = atStart ? LocationOptions.BEFORE : LocationOptions.AFTER;
+    var pages = [];
+    for (var i = 0; i < figs.length; i++) {
+        var pg = doc.pages.add(loc, ref);
+        pages.push(pg); ref = pg; loc = LocationOptions.AFTER;
+    }
+    // inserted pages can swap later pages between left and right: refit the story frames
+    for (var k = 0; k < story.textContainers.length; k++) {
+        var c = story.textContainers[k];
+        if (c.parentPage) c.geometricBounds = textBox(c.parentPage);
+    }
+    flow();
+    for (var j = 0; j < figs.length; j++) siFigurePage(pages[j], figs[j], j == 0);
+    // nothing left in the story (no tables or movies): drop its empty page(s)
+    if (!/\S/.test(story.contents)) {
+        var tc = story.textContainers;
+        for (var e = tc.length - 1; e >= 0; e--)
+            if (tc[e].parentPage && doc.pages.length > 1) tc[e].parentPage.remove();
     }
 }
 
