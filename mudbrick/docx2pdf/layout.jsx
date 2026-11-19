@@ -31,8 +31,6 @@ var CFG = {
     subheadingSpaceAbove: 0,   // extra space above subheadings, on top of the paragraph spacing (pt)
     referenceSpacing: 3,       // space between references (pt); never widened to fill columns
     figureRefStyle: "Semibold", // figure references in the text ("Figure 1B, S1C"); null: leave as typed
-    figureDisplay: "typical",  // on-screen display of placed figures: "typical" (fast preview),
-                               // "high" or null (InDesign's default). PDF export is always full quality.
     fillColumns: true,         // fill gaps left when a heading moves to the next column
     columnFillLimit: 12,       // most extra space added between two paragraphs to do so (pt)
     figurePosition: "top",     // "top" or "bottom" of the page after first citation
@@ -666,12 +664,7 @@ for (var pf = 0; pf < PLACED.length; pf++) {
     figureStroke(nr);
     app.pdfPlacePreferences.pdfCrop = PDFCrop.CROP_PDF;
     nr.place(P.file);
-    var pg = positionGraphic(nr, P.ox, P.oy);
-    // Large vector figures (some with very high-resolution images inside) make InDesign
-    // slow to scroll and zoom when it draws them in High Quality; a fast preview is
-    // enough for layout work and does not affect the exported PDF.
-    var DISPLAY = { typical: DisplaySettingOptions.TYPICAL, high: DisplaySettingOptions.HIGH_QUALITY };
-    if (CFG.figureDisplay && DISPLAY[CFG.figureDisplay]) pg.localDisplaySetting = DISPLAY[CFG.figureDisplay];
+    positionGraphic(nr, P.ox, P.oy);
 }
 
 // ---------------------------------------------------------------------------

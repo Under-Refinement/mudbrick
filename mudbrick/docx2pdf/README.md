@@ -193,10 +193,6 @@ a missing legend, notes like `[jhd stopped here]`, or several running titles.
   two-column frame per page, because its captions and wide tables span both columns.
 * Figures have no border. Use `--figure-border`, or `"figure_border": true` in a
   settings file, to draw a thin 0.5 pt border around every figure in both PDFs.
-* Placed figures are set to InDesign's Typical (fast preview) display, so the .indd stays
-  quick to scroll and zoom even with large vector figures; the PDF export always uses the
-  full artwork (`figureDisplay` in `layout.jsx`; View → Display Performance → High
-  Quality Display shows everything at full quality).
 * Figure files are embedded in the saved .indd files, so they open on any computer.
   Use `--link-figures`, or `"embed_figures": false`, to keep them linked to the figure
   files instead, which keeps the .indd small.
