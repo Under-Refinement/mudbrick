@@ -126,7 +126,8 @@ def run(args):
                 if main_pages:
                     start = main_pages + 1
                 else:
-                    print("note: main PDF page count unknown; supplement pages numbered S1, S2, ...")
+                    print("note: main PDF page count unknown; supplement pages numbered %s1, %s2, ..."
+                          % (cfg["supplement_page_prefix"], cfg["supplement_page_prefix"]))
             print("laying out the supplement in InDesign ...", flush=True)
             print(adobe.run_jsx("indesign", LAYOUT, [supp_build, supp_out, start]))
             print("PDF:      " + supp_out)

@@ -63,7 +63,7 @@ These are saved next to the manuscript:
 | File | What it is |
 |---|---|
 | `paper_preprint.pdf` and `.indd` | The preprint |
-| `paper_supplement.pdf` and `.indd` | The supplement, with pages numbered S1, S2, … (only if there is a supplement file) |
+| `paper_supplement.pdf` and `.indd` | The supplement, with pages numbered SI-1, SI-2, … (only if there is a supplement file) |
 | `paper_figure_legends.docx` | All the main figure captions in one Word file |
 
 ## Sharp figures: use `.ai` files
@@ -136,9 +136,9 @@ The supplement is laid out like a journal supplement:
 - **Tables** sit in the two-column grid with the caption below. Narrow tables take one
   column and wide ones span both.
 - **Figures** come one per page, with the caption below.
-- **Page numbers** continue from the main preprint (if it is 14 pages, the supplement
-  starts at 15). With `--supplement-only` and no preprint built yet, pages are numbered
-  S1, S2, … instead.
+- **Page numbers** are SI-1, SI-2, … To continue from the main preprint instead (if it
+  is 14 pages, the supplement starts at 15), set `"supplement_page_numbers": "continue"`
+  in a settings file.
 - **Labels** follow how the manuscript cites the supplement: "Figure S1." if the text says
   "Figure S1", or "Supplementary Figure 1." if it says "Supplementary Figure 1".
 

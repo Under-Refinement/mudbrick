@@ -702,7 +702,7 @@ function buildSupplement() {
         doc.sections[0].properties = { continueNumbering: false, pageNumberStart: START_PAGE,
                                        includeSectionPrefix: false };
     else
-        doc.sections[0].properties = { sectionPrefix: "S", includeSectionPrefix: true };
+        doc.sections[0].properties = { sectionPrefix: M.page_prefix || "SI-", includeSectionPrefix: true };
     LOG.push("Supplement: " + M.si_figures.length + " figures, " + M.tables.length + " tables");
 }
 

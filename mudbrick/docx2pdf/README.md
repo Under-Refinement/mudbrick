@@ -122,9 +122,9 @@ layout follows a journal-style supplement:
     the column or taller than the room above its caption, it overprints the margins (or
     the caption) and a warning says by how much.
   * The caption's bold title runs into its text (setting `supplement_title_inline`).
-* **Page numbers** continue from the main PDF (setting `supplement_page_numbers`:
-  `"continue"` or `"S"`). When the main PDF's page count is unknown, pages are numbered
-  S1, S2, …
+* **Page numbers** are SI-1, SI-2, … (setting `supplement_page_prefix`). With
+  `"supplement_page_numbers": "continue"` they continue from the main PDF instead (and
+  fall back to the prefixed numbers when the main PDF's page count is unknown).
 * **Labels** follow the manuscript's citation style: `Figure S1.` / `Table S1.` /
   `Movie S1.` when the text cites "Figure S1", otherwise `Supplementary Figure 1.` and so
   on. Odd original wording ("Table 1:", "Supplementary Figure. 5.") is normalized.

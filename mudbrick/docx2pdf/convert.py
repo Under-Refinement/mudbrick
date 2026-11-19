@@ -65,8 +65,10 @@ DEFAULT_CONFIG = {
     "supplement_figure_per_page": True,
     # Tables narrower than a column sit in one column; wider ones span both.
     "supplement_table_columns": True,
-    # Supplement page numbers: "continue" from the main PDF (S1, S2, ... if unknown) or "S".
-    "supplement_page_numbers": "continue",
+    # Supplement page numbers: "prefix" (SI-1, SI-2, ... with supplement_page_prefix) or
+    # "continue" from the main PDF (prefixed numbers if its page count is unknown).
+    "supplement_page_numbers": "prefix",
+    "supplement_page_prefix": "SI-",
     # Use the pictures embedded in the captions document even when figure files exist.
     # (They are always used for figures that have no file.)
     "figures_from_captions": False,
@@ -1339,6 +1341,7 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, 
     tg.write(os.path.join(out_dir, "si.txt"))
     manifest = {"mode": "supplement", "running_title": running_title,
                 "figure_border": cfg["figure_border"],
+                "page_prefix": cfg["supplement_page_prefix"],
                 "embed_figures": cfg["embed_figures"],
                 "figures": [], "si_figures": figures, "tables": tables,
                 "movies": len(items["movies"]), "label_style": style,
