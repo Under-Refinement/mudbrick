@@ -74,6 +74,9 @@ DEFAULT_CONFIG = {
     "min_print_ppi": 300,
     # Draw a thin border around every figure (main paper and supplement).
     "figure_border": False,
+    # Embed the figure files in the saved .indd (it then opens anywhere, but is large).
+    # False: keep them linked to the files in the figure folder.
+    "embed_figures": True,
     # Typeset stand-alone Word equations with TeX in the body font (needs a TeX engine
     # such as Tectonic: brew install tectonic). Off, or without TeX: plain text.
     "typeset_equations": True,
@@ -891,6 +894,7 @@ def convert(docx_path, out_dir, cfg, fig_dir=None, write_outputs=True):
     manifest["missing_glyphs"] = sorted("U+%04X" % ord(c) for c in miss)
     manifest["warnings"] = WARNINGS
     manifest["figure_border"] = cfg["figure_border"]
+    manifest["embed_figures"] = cfg["embed_figures"]
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=1, ensure_ascii=False)
     return manifest
@@ -1335,6 +1339,7 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, 
     tg.write(os.path.join(out_dir, "si.txt"))
     manifest = {"mode": "supplement", "running_title": running_title,
                 "figure_border": cfg["figure_border"],
+                "embed_figures": cfg["embed_figures"],
                 "figures": [], "si_figures": figures, "tables": tables,
                 "movies": len(items["movies"]), "label_style": style,
                 "cstyles": sorted(tg.cstyles | cover.cstyles | {"cs_sb_i"}),

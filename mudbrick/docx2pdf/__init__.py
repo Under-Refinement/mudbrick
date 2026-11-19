@@ -37,6 +37,8 @@ def add_arguments(p):
                    help="use the pictures in the captions .docx even if figure files exist")
     p.add_argument("--figure-border", action="store_true",
                    help="draw a thin border around every figure")
+    p.add_argument("--link-figures", action="store_true",
+                   help="link the figure files from the .indd instead of embedding them")
     p.add_argument("--supplement", metavar="DOCX",
                    help="supplementary .docx (default: found by name next to the manuscript)")
     p.add_argument("--no-supplement", action="store_true",
@@ -74,6 +76,8 @@ def run(args):
         cfg["figures_from_captions"] = True
     if args.figure_border:
         cfg["figure_border"] = True
+    if args.link_figures:
+        cfg["embed_figures"] = False
     supp = None if args.no_supplement else (
         os.path.abspath(args.supplement) if args.supplement else convert.find_supplement_docx(docx))
     if args.supplement_only and args.no_supplement:

@@ -170,8 +170,10 @@ The supplement is laid out like a journal supplement:
 - **Data availability, author contributions** and similar sections are moved after the
   references, whether they were written as headings or as bold labels at the start of a
   paragraph.
-- **In the supplement,** every figure stays on the same page as its caption and grows to the
-  full caption width when it fits. Tables become real InDesign tables in a clean, minimal
+- **Figures are never scaled,** so their font sizes stay as drawn: each is trimmed to its
+  artwork, centred, and placed at 100%. One wider or taller than the space overprints the
+  margins, with a warning.
+- **In the supplement,** every figure stays on the same page as its caption. Tables become real InDesign tables in a clean, minimal
   style, and a table that fits on one page is never split.
 - **The PDF** is made for printing: lossless images, fully embedded fonts, and anything above
   600 ppi reduced to 450 ppi to keep file sizes reasonable.
@@ -188,6 +190,7 @@ The supplement is laid out like a journal supplement:
 | `--no-supplement` | Skip the supplement |
 | `--figures-from-captions` | Use the figures pasted into Word even if figure files exist |
 | `--figure-border` | Add a thin border around every figure |
+| `--link-figures` | Link the figure files from the .indd instead of embedding them |
 | `-c settings.json` | Change other settings for one paper |
 
 The tool can also be written as a flag: `mudbrick --docx2pdf paper.docx`.

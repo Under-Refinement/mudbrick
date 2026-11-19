@@ -117,8 +117,10 @@ layout follows a journal-style supplement:
 * **Figures:**
   * One per page (setting `supplement_figure_per_page`), with the caption below on the
     same page.
-  * A figure grows to the full width when figure and caption still fit; otherwise it is
-    made as large as fits.
+  * A figure is placed at 100% of its size (never scaled, so its font sizes stay as
+    drawn), trimmed to its artwork and centred on the text column. If it is wider than
+    the column or taller than the room above its caption, it overprints the margins (or
+    the caption) and a warning says by how much.
   * The caption's bold title runs into its text (setting `supplement_title_inline`).
 * **Page numbers** continue from the main PDF (setting `supplement_page_numbers`:
   `"continue"` or `"S"`). When the main PDF's page count is unknown, pages are numbered
@@ -172,11 +174,20 @@ a missing legend, notes like `[jhd stopped here]`, or several running titles.
 * The abstract block on page 1 ends at 730 pt (`abstractBottom`), leaving clear space
   above the footer rule.
 * Otherwise, each figure goes at the top of the page after the page where it is first cited.
-  A figure can shrink to 90% of its file size so that more of its legend fits on the
-  same page. Legend panels that still don't fit continue at the foot of the next page,
-  under "Figure N (continued from prior page)."
+  A figure is placed at 100% of its size, never scaled, so its font sizes stay as drawn.
+  Its white margins are trimmed (the Illustrator artboard need not fit the artwork) and
+  the artwork is centred on the text column; if it is wider than the column it overprints
+  into the side margins and a warning says by how much. Legend panels that don't fit
+  under it continue at the foot of the next page, under "Figure N (continued from prior
+  page)."
+* The paper's text runs in two separate, linked text frames per page (one per column),
+  so either column's height can be adjusted by hand in InDesign. The supplement uses one
+  two-column frame per page, because its captions and wide tables span both columns.
 * Figures have no border. Use `--figure-border`, or `"figure_border": true` in a
   settings file, to draw a thin 0.5 pt border around every figure in both PDFs.
+* Figure files are embedded in the saved .indd files, so they open on any computer.
+  Use `--link-figures`, or `"embed_figures": false`, to keep them linked to the figure
+  files instead, which keeps the .indd small.
 * Stand-alone Word equations (made with Insert → Equation, on their own line,
   optionally followed by a number such as `(1)`) are converted to LaTeX and typeset
   with TeX, in Myriad Pro: letters, digits and Greek come from the body font, and only
@@ -196,9 +207,12 @@ a missing legend, notes like `[jhd stopped here]`, or several running titles.
   Headings keep exactly their usual spacing, so a column with few paragraph breaks may
   still end slightly short. Settings: `fillColumns` and `columnFillLimit` in
   `layout.jsx`.
-* All body paragraphs are spaced evenly, 6 pt apart, and every heading and subheading
-  has the same 10 pt above it (`paragraphSpacing` and `headingSpaceAbove` in
-  `layout.jsx`). To keep runs of short lines, such as an author-contributions list,
+* All body paragraphs are spaced evenly, 6 pt apart, and every section heading has
+  10 pt above it (`paragraphSpacing` and `headingSpaceAbove` in `layout.jsx`).
+  Subheadings get no extra space: just the paragraph spacing after body text, and none
+  directly under a section heading (`subheadingSpaceAbove`).
+* References are 3 pt apart (`referenceSpacing`), and that spacing is never widened to
+  fill out a column. To keep runs of short lines, such as an author-contributions list,
   tight instead, set `"uniform_paragraph_spacing": false`.
 * A legend's bold title sits on its own line, and the panels then run on in one
   paragraph: "…end of A. **(B)** …". If a legend doesn't fit under its figure, it

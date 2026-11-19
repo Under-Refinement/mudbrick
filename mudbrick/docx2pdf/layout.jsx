@@ -26,9 +26,10 @@ var CFG = {
     ruleGap: 6,                // legend -> separator rule
     wrapGap: 12,               // separator rule -> body text
     minLegendLines: 5,         // keep at least this much legend with its figure
-    minFigScale: 0.9,          // figures may shrink to this to keep more legend on the page
     paragraphSpacing: 6,       // space between body paragraphs (pt)
-    headingSpaceAbove: 10,     // space above section headings and subheadings (pt)
+    headingSpaceAbove: 10,     // space above section headings (pt)
+    subheadingSpaceAbove: 0,   // extra space above subheadings, on top of the paragraph spacing (pt)
+    referenceSpacing: 3,       // space between references (pt); never widened to fill columns
     fillColumns: true,         // fill gaps left when a heading moves to the next column
     columnFillLimit: 12,       // most extra space added between two paragraphs to do so (pt)
     figurePosition: "top",     // "top" or "bottom" of the page after first citation
@@ -121,8 +122,8 @@ var COL_W = (CFG.pageW - CFG.inside - CFG.outside - CFG.gutter) / 2;
 var HEAD_GAP = Math.max(0, CFG.headingSpaceAbove - CFG.paragraphSpacing);
 pstyle("H1",         { fontStyle: "Bold", pointSize: 12, leading: 14.4, fillColor: RED, keepWithNext: 2, keepAllLinesTogether: true, spaceBefore: HEAD_GAP });
 pstyle("H1Back",     { fontStyle: "Bold", pointSize: 12, leading: 14.4, fillColor: RED, keepWithNext: 2, keepAllLinesTogether: true, spaceBefore: HEAD_GAP });
-pstyle("H2",         { fontStyle: "Bold", keepWithNext: 2, keepAllLinesTogether: true, spaceBefore: HEAD_GAP });
-pstyle("Reference",  { justification: J, pointSize: 8, leading: 9.6, spaceAfter: 6.4,
+pstyle("H2",         { fontStyle: "Bold", keepWithNext: 2, keepAllLinesTogether: true, spaceBefore: CFG.subheadingSpaceAbove });
+pstyle("Reference",  { justification: J, pointSize: 8, leading: 9.6, spaceAfter: CFG.referenceSpacing,
                        keepAllLinesTogether: true });
 pstyle("Title",      { fontStyle: "Bold", pointSize: 16, leading: 19.2, justification: C });
 pstyle("Authors",    { fontStyle: "Bold", pointSize: 12, leading: 14.4, justification: C, spaceBefore: 54 });
@@ -316,17 +317,30 @@ function layoutTitlePage() {
 }
 
 // ---------------------------------------------------------------------------
-// Body: two-column story threaded over as many pages as needed
+// Body: two-column story threaded over as many pages as needed. In the paper each
+// column is its own text frame (left -> right -> next page), so each column's height can
+// be changed by hand afterwards. The supplement keeps one two-column frame per page,
+// because its captions, wide tables and headings span both columns.
 // ---------------------------------------------------------------------------
 function addBodyPage(prevFrame, page) {
     page = page || doc.pages.add(LocationOptions.AT_END);
-    var fr = page.textFrames.add({ geometricBounds: textBox(page) });
-    fr.textFramePreferences.textColumnCount = 2;
-    fr.textFramePreferences.textColumnGutter = CFG.gutter;
-    if (prevFrame) prevFrame.nextTextFrame = fr;
-    return fr;
+    var tb = textBox(page);
+    if (SI) {
+        var fr = page.textFrames.add({ geometricBounds: tb });
+        fr.textFramePreferences.textColumnCount = 2;
+        fr.textFramePreferences.textColumnGutter = CFG.gutter;
+        if (prevFrame) prevFrame.nextTextFrame = fr;
+        return fr;
+    }
+    var colW = (tb[3] - tb[1] - CFG.gutter) / 2;
+    var left = page.textFrames.add({ geometricBounds: [tb[0], tb[1], tb[2], tb[1] + colW] });
+    var right = page.textFrames.add({ geometricBounds: [tb[0], tb[3] - colW, tb[2], tb[3]] });
+    if (prevFrame) prevFrame.nextTextFrame = left;
+    left.nextTextFrame = right;
+    return right;   // the last frame of the thread
 }
 var first = addBodyPage(null);   // the body (or supplement content) starts on page 2
+if (!SI) first = first.previousTextFrame;   // the page's left column
 first.place(File(BUILD + (SI ? "/si.txt" : "/body.txt")));
 var story = first.parentStory;
 
@@ -425,16 +439,18 @@ function rule(page, y, x1, x2) {
     return l;
 }
 
-// Shrink the body-text frame on page pi to the space figures leave free.
+// Shrink the body-text frames (both columns) on page pi to the space figures leave free.
 // (Text wrap is avoided: InDesign drops some placed AI/PDF art under a wrap on export.)
 function reserve(pi) {
-    var tb = textBox(doc.pages[pi]), sl = slot(pi), fr = null, tc = story.textContainers;
+    var tb = textBox(doc.pages[pi]), sl = slot(pi), frs = [], tc = story.textContainers;
     for (var i = 0; i < tc.length; i++)
-        if (tc[i].parentPage && tc[i].parentPage.documentOffset == pi) fr = tc[i];
-    if (!fr) return;
+        if (tc[i].parentPage && tc[i].parentPage.documentOffset == pi) frs.push(tc[i]);
     var y1 = tb[0] + sl.top, y2 = tb[2] - sl.bottom;
-    if (y2 - y1 < 3 * 12) fr.remove();          // thread skips straight to the next page
-    else fr.geometricBounds = [y1, tb[1], y2, tb[3]];
+    for (var k = frs.length - 1; k >= 0; k--) {
+        var b = frs[k].geometricBounds;
+        if (y2 - y1 < 3 * 12) frs[k].remove();  // thread skips straight to the next page
+        else frs[k].geometricBounds = [y1, b[1], y2, b[3]];
+    }
 }
 
 // Text frame holding a legend.
@@ -451,6 +467,21 @@ function usedHeight(f) {
     var ls = f.lines;
     if (!ls.length) return 0;
     return ls[ls.length - 1].baseline - f.geometricBounds[0] + 3;
+}
+
+// Put a frame's placed artwork so its top-left corner sits (ox, oy) from the frame's
+// top-left corner (negative = the artwork starts above/left of the frame, i.e. it is
+// trimmed). Never set a graphic's geometricBounds directly: with page rulers InDesign
+// reads and writes a placed graphic's bounds relative to the spread, not its page, so
+// on a right-hand page the artwork lands on the facing page, under that page's text,
+// while the empty frame stays put.
+function positionGraphic(rect, ox, oy) {
+    var g = rect.allGraphics[0];
+    var where = [AnchorPoint.TOP_LEFT_ANCHOR, BoundingBoxLimits.GEOMETRIC_PATH_BOUNDS];
+    var f = rect.resolve(where, CoordinateSpaces.PASTEBOARD_COORDINATES)[0];
+    var c = g.resolve(where, CoordinateSpaces.PASTEBOARD_COORDINATES)[0];
+    g.move(undefined, [f[0] + ox - c[0], f[1] + oy - c[1]]);
+    return g;
 }
 
 function placeFigure(fig, forcePi) {
@@ -498,7 +529,16 @@ function placeFigure(fig, forcePi) {
         rect.strokeWeight = 0.5;
     }
     var natW = fullW * (crop[2] - crop[0]), natH = fullH * (crop[3] - crop[1]);
-    var s = Math.min(1, W / natW);
+    // Never resized: scaling the artwork would change its font sizes. Artwork wider
+    // than the text column is centred and extends into the side margins.
+    var s = 1, wideWarning = null;
+    if (file && natW > W + 0.5) {
+        var side = (natW - W) / 2;
+        wideWarning = ("WARNING: Figure " + fig.num + " artwork is " + Math.round(natW) + " pt wide, " +
+                 Math.round(natW - W) + " pt wider than the " + Math.round(W) + "-pt text column; " +
+                 "it overprints " + Math.round(side) + " pt into each side margin" +
+                 (side > Math.min(tb[1], CFG.pageW - tb[3]) ? " and runs off the page edge" : "") + ".");
+    }
 
     // Decide how big it is and how much legend fits with it.
     var extras = CFG.figGap + CFG.ruleGap + CFG.wrapGap;
@@ -507,14 +547,16 @@ function placeFigure(fig, forcePi) {
     if (room < natH * s * 0.6 + minLegend && (slot(pi).top || slot(pi).bottom)) {
         rect.remove(); return placeFigure(fig, pi + 1);
     }
-    if (natH * s + legendH > room)      // shrink a little to keep the whole legend
-        s *= Math.min(1, Math.max(CFG.minFigScale, (room - legendH) / (natH * s)));
-    if (natH * s + minLegend > room)    // shrink further to keep some legend with it
-        s *= (room - minLegend) / (natH * s);
     var figW = natW * s, figH = natH * s;
+    var legendRoom = room - figH;
+    if (legendRoom < lineH * 1.5) {
+        LOG.push("WARNING: Figure " + fig.num + " artwork is " + Math.round(natH) + " pt tall and leaves " +
+                 "no room for its legend on page " + (pi + 1) + "; it overprints the page foot.");
+        legendRoom = lineH * 1.5;
+    }
 
     // Set the legend; panels that do not fit continue on the next page.
-    var lf = legendFrame(page, tb, room - figH, legendFile);
+    var lf = legendFrame(page, tb, legendRoom, legendFile);
     var split = lf.overflows;
     if (split) {   // cut at the last line that fits; the rest continues on the next page
         var keep = lf.characters.length;
@@ -533,14 +575,10 @@ function placeFigure(fig, forcePi) {
     var x0 = tb[1] + (W - figW) / 2;
 
     rect.geometricBounds = [y0, x0, y0 + figH, x0 + figW];
-    if (file) {   // scale the whole image, then shift so the content box fills the frame
-        var gw = fullW * s, gh = fullH * s;
-        var gy = y0 - crop[1] * gh, gx = x0 - crop[0] * gw;
-        rect.allGraphics[0].geometricBounds = [gy, gx, gy + gh, gx + gw];
-    }
+    var ox = -crop[0] * fullW, oy = -crop[1] * fullH;   // at 100 %: shift so the content fills the frame
+    if (file) positionGraphic(rect, ox, oy);
     lf.geometricBounds = [y0 + figH + CFG.figGap, tb[1], y0 + blockH, tb[3]];
-    if (file) PLACED.push({ page: page, file: file, frame: rect.geometricBounds,
-                            graphic: rect.allGraphics[0].geometricBounds, rect: rect });
+    if (file) PLACED.push({ page: page, file: file, frame: rect.geometricBounds, ox: ox, oy: oy, rect: rect });
 
     var fullPage = (avail - slot(pi).top - slot(pi).bottom - blockH - extras) < 3 * 12;
     if (atTop) {
@@ -555,6 +593,7 @@ function placeFigure(fig, forcePi) {
     reserve(pi);
 
     flow();
+    if (wideWarning) LOG.push(wideWarning);
     LOG.push("Figure " + fig.num + ": cited p" + (citePage + 1) + ", placed p" + (pi + 1) +
              (atTop ? " top" : " bottom") + ", " + Math.round(100 * s) + "% of file size" +
              (split ? ", legend continued on p" + (pi + 2) : ""));
@@ -599,13 +638,14 @@ for (var pf = 0; pf < PLACED.length; pf++) {
     figureStroke(nr);
     app.pdfPlacePreferences.pdfCrop = PDFCrop.CROP_PDF;
     nr.place(P.file);
-    nr.allGraphics[0].geometricBounds = P.graphic;
+    positionGraphic(nr, P.ox, P.oy);
 }
 
 // ---------------------------------------------------------------------------
 // Supplement: replace [[FIG:n]] / [[TABLE:n]] placeholders with pictures and tables
 // ---------------------------------------------------------------------------
 function buildSupplement() {
+    SI_PLACED = [];
     var tb = textBox(doc.pages[0]), W = tb[3] - tb[1], CW = (W - CFG.gutter) / 2;
     var maxH = tb[2] - tb[0];   // a whole page; siFigure subtracts the caption's height
     for (var guard = 0; guard < 500; guard++) {
@@ -627,6 +667,7 @@ function buildSupplement() {
         flow();
     }
     app.findGrepPreferences = NothingEnum.NOTHING;
+    placeSIFigures();
     if (START_PAGE > 0)   // continue the main paper's page numbers
         doc.sections[0].properties = { continueNumbering: false, pageNumberStart: START_PAGE,
                                        includeSectionPrefix: false };
@@ -670,28 +711,72 @@ function keepTableWithCaption(tablePara, wide, CW) {
     }
 }
 
+// Supplementary figures are never resized (that would change their font sizes). The
+// text only reserves their space with an empty inline frame; once the layout is final,
+// placeSIFigures() puts each figure at 100 % on its page, centred on the text column over
+// that space. A figure larger than the space overprints the margins or its caption.
+// (Placing them inline instead makes InDesign drop the artwork of a figure whose
+// paragraph is later pushed to a new page, and cannot let a figure overhang the text.)
+var SI_PLACED = [];   // reset in buildSupplement(), which runs before this line
+
 function siFigure(ip, fig, W, maxH) {
     app.pdfPlacePreferences.pdfCrop = PDFCrop.CROP_PDF;
+    app.pdfPlacePreferences.transparentBackground = true;
     var para = ip.paragraphs[0];
-    // room below where the figure starts (e.g. under a section header); a whole page if
-    // that's too little, since the figure then moves on with its caption
-    var tb = textBox(doc.pages[0]), y0 = tb[0];
-    if (para.parentTextFrames.length && para.lines.length) y0 = para.lines[0].baseline - 12;
     var capH = captionHeight(para, W);
-    var room = tb[2] - y0 - capH - 6 - 6 - 8;
-    if (room < (maxH - capH) * 0.4) room = maxH - capH - 20;
-    var g = ip.place(File(fig.file))[0], rect = g.parent;
-    var crop = fig.crop || [0, 0, 1, 1], gb = g.geometricBounds;
+    // natural size of the artwork, trimmed to its content
+    var tmp = doc.pages[0].rectangles.add({ geometricBounds: [0, 0, 10, 10] });
+    var gb = tmp.place(File(fig.file))[0].geometricBounds;
+    tmp.remove();
+    var crop = fig.crop || [0, 0, 1, 1];
     var fullW = gb[3] - gb[1], fullH = gb[2] - gb[0];
     var natW = fullW * (crop[2] - crop[0]), natH = fullH * (crop[3] - crop[1]);
-    var s = Math.min(W / natW, Math.max(room, 72) / natH);
-    var rb = rect.geometricBounds;
-    rect.geometricBounds = [rb[0], rb[1], rb[0] + natH * s, rb[1] + natW * s];
-    // scale the whole image, then shift so the trimmed content fills the frame
-    rb = rect.geometricBounds;
-    var gw = fullW * s, gh = fullH * s, gy = rb[0] - crop[1] * gh, gx = rb[1] - crop[0] * gw;
-    rect.allGraphics[0].geometricBounds = [gy, gx, gy + gh, gx + gw];
-    figureStroke(rect);
+    var maxRoom = Math.max(72, maxH - capH - 20);   // most a page can hold above the caption
+    var spacer = ip.rectangles.add({ geometricBounds: [0, 0, 10, 10] });
+    var rb = spacer.geometricBounds;
+    spacer.geometricBounds = [rb[0], rb[1], rb[0] + Math.min(natH, maxRoom), rb[1] + Math.min(natW, W)];
+    spacer.strokeWeight = 0;
+    spacer.strokeColor = doc.swatches.itemByName("None");
+    spacer.fillColor = doc.swatches.itemByName("None");
+    SI_PLACED.push({ spacer: spacer, fig: fig, crop: crop, fullW: fullW, fullH: fullH,
+                     natW: natW, natH: natH, W: W });
+}
+
+function placeSIFigures() {
+    for (var i = 0; i < SI_PLACED.length; i++) {
+        var it = SI_PLACED[i], sp = it.spacer, page = sp.parentPage, n = it.fig.num;
+        if (!page) { LOG.push("WARNING: Supplementary Figure " + n + " did not fit on any page."); continue; }
+        var sb = sp.geometricBounds, tb = textBox(page), W = tb[3] - tb[1];
+        var x0 = tb[1] + (W - it.natW) / 2;
+        var over = it.natH - (sb[2] - sb[0]);
+        // a figure taller than its space first uses the empty top margin, then runs down
+        var up = over > 0 ? Math.min(over, Math.max(0, sb[0] - 18)) : 0;
+        var y0 = sb[0] - up;
+        var rect = page.rectangles.add({ geometricBounds: [y0, x0, y0 + it.natH, x0 + it.natW] });
+        rect.place(File(it.fig.file));
+        var ox = -it.crop[0] * it.fullW, oy = -it.crop[1] * it.fullH;
+        positionGraphic(rect, ox, oy);
+        // the final frame comes from the re-place pass after the layout, as for main figures
+        PLACED.push({ page: page, file: File(it.fig.file), frame: rect.geometricBounds, ox: ox, oy: oy, rect: rect });
+        figureStroke(rect);
+        if (it.natW > W + 0.5) {
+            var side = (it.natW - W) / 2;
+            LOG.push("WARNING: Supplementary Figure " + n + " artwork is " + Math.round(it.natW) +
+                     " pt wide, " + Math.round(it.natW - W) + " pt wider than the " + Math.round(W) +
+                     "-pt text column; it overprints " + Math.round(side) + " pt into each side margin" +
+                     (side > Math.min(tb[1], CFG.pageW - tb[3]) ? " and runs off the page edge" : "") + ".");
+        }
+        if (over > 0.5) {
+            var down = over - up;
+            LOG.push("WARNING: Supplementary Figure " + n + " artwork is " + Math.round(it.natH) +
+                     " pt tall, " + Math.round(over) + " pt more than fits with its caption on page " +
+                     page.name + "; it overprints " +
+                     (up > 0.5 ? Math.round(up) + " pt of the top margin" : "") +
+                     (up > 0.5 && down > 0.5 ? " and " : "") +
+                     (down > 0.5 ? Math.round(down) + " pt of its caption" +
+                      (y0 + it.natH > CFG.footerRule ? " and the page footer" : "") : "") + ".");
+        }
+    }
 }
 
 function siTable(ip, t, W) {
@@ -770,7 +855,7 @@ doc.recompose();
 // with its first lines (leaving more than a line empty), the gap is shared out between
 // that column's ordinary paragraphs only, so headings keep exactly their usual spacing.
 // Columns with the normal under-one-line remainder are left alone.
-var FILLABLE = { "Body": 1, "BodyTight": 1, "Equation": 1, "EquationTeX": 1, "Reference": 1 };
+var FILLABLE = { "Body": 1, "BodyTight": 1, "Equation": 1, "EquationTeX": 1 };   // not references: their spacing stays fixed
 function fillColumnGaps() {
     var conts = story.textContainers, filled = 0;
     for (var k = 0; k < conts.length - 1; k++) {          // the story's last frame stays as is
@@ -856,7 +941,7 @@ for (var li = 0; li < ladder.length; li++) {
         if (!L) throw e;
     }
 }
-if (CFG.embedFigures) {
+if (CFG.embedFigures && M.embed_figures !== false) {
     var embedded = 0, failed = [];
     for (var k = doc.links.length - 1; k >= 0; k--) {
         var lk = doc.links[k];
@@ -866,6 +951,7 @@ if (CFG.embedFigures) {
     LOG.push("Embedded " + embedded + " figure file(s) in the .indd" +
              (failed.length ? "; could not embed: " + failed.join(", ") : ""));
 }
+if (M.embed_figures === false) LOG.push("Figures linked, not embedded: keep the figure folder next to the .indd");
 doc.save(File(OUTPDF.fsName.replace(/\.pdf$/i, "") + ".indd"));
 LOG.push("pages: " + doc.pages.length);
 doc.close(SaveOptions.NO);
