@@ -30,6 +30,7 @@ var CFG = {
     headingSpaceAbove: 10,     // space above section headings (pt)
     subheadingSpaceAbove: 0,   // extra space above subheadings, on top of the paragraph spacing (pt)
     referenceSpacing: 3,       // space between references (pt); never widened to fill columns
+    figureRefStyle: "Semibold", // figure references in the text ("Figure 1B, S1C"); null: leave as typed
     fillColumns: true,         // fill gaps left when a heading moves to the next column
     columnFillLimit: 12,       // most extra space added between two paragraphs to do so (pt)
     figurePosition: "top",     // "top" or "bottom" of the page after first citation
@@ -386,6 +387,35 @@ function placeEquations() {
 }
 placeEquations();
 flow();
+
+// Figure references in the paper's body text ("Figure 1A", "Figures 2A, 3B-D and S4",
+// "Fig. S2", "Figs. 4E-F") get the "Figure reference" character style (semibold by
+// default). Done before the figures are laid out, since it makes the text a little wider.
+// A reference written in lowercase ("figure 3B") is reported, not changed.
+var FIGREF_GREP = "(?:[Ss]upplementa(?:l|ry)\\s+)?(?:[Ff]igures?|[Ff]igs?\\.)\\s*S?\\d+[A-Z]?(?:\\s*[-\\x{2013}]\\s*(?:S?\\d+[A-Z]?|[A-Z]\\b))?" +
+    "(?:(?:,\\s*|,?\\s+and\\s+)S?\\d+[A-Z]?(?:\\s*[-\\x{2013}]\\s*(?:S?\\d+[A-Z]?|[A-Z]\\b))?)*";
+function styleFigureReferences() {
+    if (!CFG.figureRefStyle) return;
+    var style = CFG.figureRefStyle == "Semibold" ? SEMIBOLD : CFG.figureRefStyle;
+    var cs = doc.characterStyles.itemByName("Figure reference");
+    if (!cs.isValid) cs = doc.characterStyles.add({ name: "Figure reference" });
+    cs.fontStyle = style;
+    var BODY = { "Body": 1, "BodyTight": 1 }, n = 0, lower = [];
+    app.findGrepPreferences = NothingEnum.NOTHING;
+    app.findGrepPreferences.findWhat = FIGREF_GREP;
+    var hits = story.findGrep();
+    app.findGrepPreferences = NothingEnum.NOTHING;
+    for (var i = 0; i < hits.length; i++) {
+        var h = hits[i];
+        if (!BODY[h.appliedParagraphStyle.name]) continue;
+        h.appliedCharacterStyle = cs; n++;
+        if (/^f/.test(h.contents)) lower.push("“" + h.contents + "”");
+    }
+    if (n) LOG.push("Figure references set in " + style + ": " + n);
+    if (lower.length)
+        LOG.push("WARNING: figure reference(s) in lowercase, probably should be capitalised: " + lower.join(", "));
+}
+if (!SI) { styleFigureReferences(); flow(); }
 
 // ---------------------------------------------------------------------------
 // Figures

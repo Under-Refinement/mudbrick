@@ -170,6 +170,7 @@ The supplement is laid out like a journal supplement:
 - **Data availability, author contributions** and similar sections are moved after the
   references, whether they were written as headings or as bold labels at the start of a
   paragraph.
+- **Figure references** in the text ("Figure 1B, S1C") are set in semibold.
 - **Figures are never scaled,** so their font sizes stay as drawn: each is trimmed to its
   artwork, centred, and placed at 100%. One wider or taller than the space overprints the
   margins, with a warning.

@@ -212,7 +212,11 @@ a missing legend, notes like `[jhd stopped here]`, or several running titles.
   Subheadings get no extra space: just the paragraph spacing after body text, and none
   directly under a section heading (`subheadingSpaceAbove`).
 * References are 3 pt apart (`referenceSpacing`), and that spacing is never widened to
-  fill out a column. To keep runs of short lines, such as an author-contributions list,
+  fill out a column.
+* Figure references in the text ("Figure 1A", "Figures 2A, 3B-D and S4", "Fig. S2",
+  "Supplementary Figure 3") are set in semibold, through a "Figure reference" character
+  style that can be restyled in InDesign (`figureRefStyle`; `null` leaves them as typed).
+  A reference written in lowercase ("figure 3B") gets a warning. To keep runs of short lines, such as an author-contributions list,
   tight instead, set `"uniform_paragraph_spacing": false`.
 * A legend's bold title sits on its own line, and the panels then run on in one
   paragraph: "…end of A. **(B)** …". If a legend doesn't fit under its figure, it
