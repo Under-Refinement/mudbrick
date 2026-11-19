@@ -809,6 +809,28 @@ function placeSIFigures() {
     }
 }
 
+// Bold / italic / superscript / subscript of a table cell's text, as typed in Word.
+// runs: [[text, flags]] covering the cell's text exactly.
+function applyRuns(text, runs) {
+    if (!runs) return;
+    var pos = 0;
+    for (var i = 0; i < runs.length; i++) {
+        var n = runs[i][0].length, f = runs[i][1];
+        if (n && f.length) {
+            var ch = text.characters.itemByRange(pos, pos + n - 1);
+            var b = false, it = false;
+            for (var k = 0; k < f.length; k++) {
+                if (f[k] == "b") b = true;
+                else if (f[k] == "i") it = true;
+                else if (f[k] == "sup") ch.position = Position.SUPERSCRIPT;
+                else if (f[k] == "sub") ch.position = Position.SUBSCRIPT;
+            }
+            if (b || it) ch.fontStyle = b && it ? "Bold Italic" : b ? "Bold" : "Italic";
+        }
+        pos += n;
+    }
+}
+
 function siTable(ip, t, W) {
     var nrows = t.rows.length, ncols = t.grid.length, total = 0, r, c, i;
     for (i = 0; i < ncols; i++) total += t.grid[i];
@@ -823,6 +845,7 @@ function siTable(ip, t, W) {
             cell.contents = row[c].t;
             cell.texts[0].appliedParagraphStyle = cellStyle;
             if (row[c].b) cell.texts[0].fontStyle = "Bold";
+            else applyRuns(cell.texts[0], row[c].runs);
             if (row[c].span > 1) merges.push([r, col, Math.min(ncols, col + row[c].span) - 1]);
             col += row[c].span;
         }
@@ -830,18 +853,31 @@ function siTable(ip, t, W) {
     }
     for (i = merges.length - 1; i >= 0; i--)   // right-to-left, bottom-up keeps indices valid
         tbl.rows[merges[i][0]].cells[merges[i][1]].merge(tbl.rows[merges[i][0]].cells[merges[i][2]]);
-    // Minimal style: a rule at the top and bottom of the table and under each row of
-    // column headings; section rows that span the table get a light band. No other lines.
-    var allBold = true;
-    for (c = 0; c < t.rows[0].length; c++) if (!t.rows[0][c].b && t.rows[0][c].t) allBold = false;
-    // repeat the first row when the table breaks (convert it; setting headerRowCount
-    // would insert a new, empty header row instead)
-    if (allBold && nrows > 2) tbl.rows[0].rowType = RowTypes.HEADER_ROW;
+    // Minimal style: a rule at the top and bottom of the table and one under the column
+    // headings; a group heading spanning several columns (e.g. "tRNA" over "P-site" and
+    // "A-site") gets a short rule under just its columns. Section rows that span the whole
+    // table get a light band. No other lines. Row labels (first column) are left-aligned,
+    // the other columns centred.
+    // Heading rows: the top rows whose first cell is empty or bold and that have some bold
+    // text (rows spanning the whole table are section bands, not headings).
+    var hdr = 0;
+    for (r = 0; r < nrows - 1; r++) {
+        var hr = t.rows[r], firstOk = !hr[0].t || hr[0].b, someBold = false;
+        for (c = 0; c < hr.length; c++) if (hr[c].t && hr[c].b) someBold = true;
+        if (hr.length > 1 && firstOk && someBold) hdr = r + 1; else break;
+    }
     var cells = tbl.cells.everyItem();
     cells.topInset = cells.bottomInset = 2;
     cells.leftInset = cells.rightInset = 3;
     cells.topEdgeStrokeWeight = cells.bottomEdgeStrokeWeight = 0;
     cells.leftEdgeStrokeWeight = cells.rightEdgeStrokeWeight = 0;
+    for (r = 0; r < tbl.rows.length; r++)
+        for (c = 0; c < tbl.rows[r].cells.length; c++) {
+            var cl = tbl.rows[r].cells[c];
+            cl.texts[0].justification = c == 0 && cl.columnSpan == 1 ? Justification.LEFT_ALIGN
+                                                                    : Justification.CENTER_ALIGN;
+            if (r < hdr) cl.verticalJustification = VerticalJustification.BOTTOM_ALIGN;
+        }
     for (r = 0; r < nrows; r++) {
         var row = t.rows[r], rowCells = tbl.rows[r].cells.everyItem(), bold = true, any = false;
         for (c = 0; c < row.length; c++) { if (row[c].t) { any = true; if (!row[c].b) bold = false; } }
@@ -849,10 +885,25 @@ function siTable(ip, t, W) {
         if (band && bold && any) {            // section row, e.g. "Overall performance"
             rowCells.fillColor = BLACK; rowCells.fillTint = 12;
             rowCells.topInset = rowCells.bottomInset = 3;
-        } else if (bold && any && row.length > 1) {   // column headings
-            rowCells.bottomEdgeStrokeWeight = 0.5;
-            rowCells.bottomEdgeStrokeColor = BLACK; rowCells.bottomEdgeStrokeTint = 100;
+            rowCells.texts.everyItem().justification = Justification.LEFT_ALIGN;
         }
+    }
+    if (hdr) {
+        var under = tbl.rows[hdr - 1].cells.everyItem();   // rule under the headings
+        under.bottomEdgeStrokeWeight = 0.5; under.bottomEdgeStrokeColor = BLACK;
+        under.bottomEdgeStrokeTint = 100;
+        for (r = 0; r < hdr - 1; r++)                       // short rules under group headings
+            for (c = 0; c < tbl.rows[r].cells.length; c++) {
+                var g = tbl.rows[r].cells[c];
+                if (g.columnSpan > 1 && g.contents != "") {
+                    g.bottomEdgeStrokeWeight = 0.4; g.bottomEdgeStrokeColor = BLACK;
+                    g.bottomEdgeStrokeTint = 100;
+                }
+            }
+        // repeat the headings when the table breaks (convert the rows; setting
+        // headerRowCount would insert new, empty header rows instead)
+        if (nrows > hdr + 1)
+            for (r = 0; r < hdr; r++) tbl.rows[r].rowType = RowTypes.HEADER_ROW;
     }
     var top = tbl.rows[0].cells.everyItem(), bottom = tbl.rows[nrows - 1].cells.everyItem();
     top.topEdgeStrokeWeight = 0.75; top.topEdgeStrokeColor = BLACK; top.topEdgeStrokeTint = 100;

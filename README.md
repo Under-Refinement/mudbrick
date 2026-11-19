@@ -124,14 +124,16 @@ The supplement file should be set up like this:
   `figure_1/` inside a `supplementary/` folder). If there is no file, the picture pasted
   directly above the caption is used. The two can be mixed.
 - **Tables:** normal Word tables, each with a caption starting `Supplementary Table 1.`
-  (above or below the table in Word). Column headings should be bold. A bold row that spans the whole
+  (above or below the table in Word), in the supplement file or in a file of their own
+  whose name starts with "Table" (e.g. `Tables S1-6.docx`, next to the manuscript or in the
+  figure folder; or `--supp-tables FILE`). Column headings should be bold. A bold row that spans the whole
   table (like "Overall performance") becomes a grey section band.
 
 The supplement is laid out like a journal supplement:
 
 - **A cover page:** "Supplementary Information" above the paper's title, authors and
   affiliations, all taken from the manuscript.
-- **Sections:** SUPPLEMENTARY MOVIES, TABLES and FIGURES, each starting on a new page
+- **Sections:** SUPPLEMENTARY MOVIES, FIGURES and TABLES, each starting on a new page
   (only those that exist).
 - **Tables** sit in the two-column grid with the caption below. Narrow tables take one
   column and wide ones span both.
@@ -188,6 +190,7 @@ The supplement is laid out like a journal supplement:
 | `--dry-run` | Check everything without making PDFs |
 | `--supplement FILE` | Choose the supplement file directly |
 | `--supplement-only` | Only make the supplement |
+| `--supp-tables FILE` | Take the supplementary tables from this Word file |
 | `--no-supplement` | Skip the supplement |
 | `--figures-from-captions` | Use the figures pasted into Word even if figure files exist |
 | `--figure-border` | Add a thin border around every figure |

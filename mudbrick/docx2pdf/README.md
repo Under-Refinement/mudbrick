@@ -99,7 +99,7 @@ layout follows a journal-style supplement:
 
 * **Cover page:** "Supplementary Information" above the main paper's title, authors,
   affiliations and correspondence.
-* **Sections:** SUPPLEMENTARY MOVIES, SUPPLEMENTARY TABLES and SUPPLEMENTARY FIGURES
+* **Sections:** SUPPLEMENTARY MOVIES, SUPPLEMENTARY FIGURES and SUPPLEMENTARY TABLES
   (setting `supplement_order`), each starting a new page under a red header. Only
   sections with content appear.
 * **Movies:** each legend at full width.
@@ -107,11 +107,18 @@ layout follows a journal-style supplement:
   * Real InDesign tables in the two-column grid, with the caption below the table. A
     table that Word sized narrower than a column takes one column; wider tables span both
     (setting `supplement_table_columns`).
-  * The style is minimal: rules above and below the table and under each row of column
-    headings, and no other lines. A bold row spanning the table (e.g. "Overall
-    performance") becomes a light grey band.
-  * Merged cells and Word's column widths are kept, and a bold first row repeats as the
-    header when a table has to break.
+  * The tables can be in their own Word file: a .docx whose name starts with "Table"
+    (e.g. `Tables S1-6.docx`) next to the manuscript or in the figure folder, or chosen
+    with `--supp-tables FILE` (setting `supplement_tables_docx`). Tables in the
+    supplement file are then ignored.
+  * The style is minimal: rules above and below the table and one under the column
+    headings; a group heading spanning several columns (e.g. "tRNA" over "P-site" and
+    "A-site") gets a short rule under just those columns. No other lines. Row labels are
+    left-aligned and the other columns centred. A bold row spanning the table (e.g.
+    "Overall performance") becomes a light grey band.
+  * Heading rows are the top rows whose first cell is empty or bold; they repeat when a
+    table has to break. Merged cells, Word's column widths, line breaks within a cell
+    and bold, italic, superscript and subscript text are kept as typed.
   * A table that fits on a page is never split, and stays with its caption. A note
     paragraph after a table is kept with it.
 * **Figures:**

@@ -60,7 +60,11 @@ DEFAULT_CONFIG = {
     # ("Supplementary Figure 2. Title. (left) ...") instead of giving it its own line.
     "supplement_title_inline": True,
     # Supplement sections, in order (each only if present).
-    "supplement_order": ["movies", "tables", "figures"],
+    "supplement_order": ["movies", "figures", "tables"],
+    # Word file holding the supplementary tables (their "Table S1." titles, tables and
+    # notes). Default: a .docx whose name starts with "Table", next to the manuscript or
+    # in the figure folder. When there is one, tables in the supplement file are ignored.
+    "supplement_tables_docx": None,
     # Each supplementary figure starts on a new page.
     "supplement_figure_per_page": True,
     # Tables narrower than a column sit in one column; wider ones span both.
@@ -1200,20 +1204,82 @@ def supplement_label(kind, n, style):
     return "%s S%d." % (kind, n) if style == "S" else "Supplementary %s %d." % (kind, n)
 
 
+CELL_FLAGS = ("b", "i", "sup", "sub")
+
+
+def _cell_runs(ps):
+    """A cell's paragraphs as [[text, flags]] runs, paragraphs joined by "\n", keeping
+    bold / italic / superscript / subscript exactly as typed (text itself unchanged,
+    apart from look-alike characters the font lacks)."""
+    out = []
+    for k, p in enumerate(ps):
+        runs = [(fix_typography(t), f) for t, f in merge_runs(p["runs"]) if t]
+        if runs:   # trim the paragraph's outer white space, as ptext() does
+            runs[0] = (runs[0][0].lstrip(), runs[0][1])
+            runs[-1] = (runs[-1][0].rstrip(), runs[-1][1])
+        if k:
+            out.append(["\n", []])
+        out += [[t, [x for x in CELL_FLAGS if f.get(x)]] for t, f in runs if t]
+    return out
+
+
 def _table_data(b):
     rows = []
     for row in b["rows"]:
         cells = []
         for cell in row:
             ps = [p for p in cell["paras"] if ptext(p)]
-            text = "" if cell["vcont"] else "\n".join(fix_typography(ptext(p)) for p in ps)
-            cells.append({"t": text, "span": cell["span"],
+            runs = [] if cell["vcont"] else _cell_runs(ps)
+            cells.append({"t": "".join(t for t, _ in runs), "runs": runs, "span": cell["span"],
                           "b": bool(ps) and all(all_bold(p) for p in ps)})
         rows.append(cells)
     ncols = max([sum(c["span"] for c in r) for r in rows] + [len(b["grid"])])
     grid = b["grid"] if len(b["grid"]) == ncols and all(b["grid"]) else [1] * ncols
     width_pt = sum(b["grid"]) / 20.0 if all(b["grid"]) else 9999
     return {"rows": rows, "grid": grid, "width_pt": width_pt}
+
+
+def _collect_tables(blocks, style):
+    """Supplementary tables from a Word file: each "Table SN." title with the table under
+    (or above) it and the note paragraphs that follow."""
+    tables, last, waiting = [], None, None
+    for b in blocks:
+        if b["kind"] == "table":
+            data = _table_data(b)
+            if last is not None and "data" not in last:
+                last["data"] = data
+            else:
+                waiting = data
+            continue
+        t = ptext(b)
+        if not t:
+            continue
+        m = SUPP_CAPTION.match(t)
+        if m and SUPP_KIND[m.group(1).lower()] == "Table":
+            n = int(m.group(2))
+            lead = len(b["runs"][0][0]) - len(b["runs"][0][0].lstrip())
+            item = {"num": n, "notes": [],
+                    "caption": _relabel(b["runs"], m.end() - lead, supplement_label("Table", n, style))}
+            if waiting is not None:
+                item["data"], waiting = waiting, None
+            tables.append(item)
+            last = item
+        elif last is not None and "data" in last:
+            last["notes"].append(b)
+        else:
+            WARNINGS.append("Text in the tables file outside any table left out: %s" % t[:60])
+    return tables
+
+
+def find_tables_docx(docx_path, fig_dir=None):
+    """A .docx whose name starts with "Table" (e.g. "Tables S1-6.docx"), next to the
+    manuscript or in the figure folder."""
+    found = []
+    for folder in [os.path.dirname(os.path.abspath(docx_path))] + ([fig_dir] if fig_dir else []):
+        if os.path.isdir(folder):
+            found += [os.path.join(folder, x) for x in os.listdir(folder)
+                      if x.lower().endswith(".docx") and x.lower().startswith("table")]
+    return max(found, key=os.path.getmtime) if found else None
 
 
 def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, fig_dir=None):
@@ -1230,6 +1296,9 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, 
     style = supplement_label_style(mparas)
     blocks = read_blocks(supp_docx, cfg["tracked_changes"])
     images = extract_caption_images(supp_docx, blocks, _supp_number, out_dir, "supp_fig%d")
+    tables_docx = cfg.get("supplement_tables_docx") or find_tables_docx(manuscript_docx, fig_dir)
+    if tables_docx and os.path.abspath(tables_docx) == os.path.abspath(supp_docx):
+        tables_docx = None
 
     # ---- cover page: "Supplementary Information" over the main title block ----
     cover = Tagged()
@@ -1291,6 +1360,12 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, 
                                    cfg["trim_padding"]) or crop
             item.update(file=path, px=pixel_width(path), crop=crop, source=source)
         items["figures"].append(item)
+
+    if tables_docx:   # the tables come from their own Word file
+        if items["tables"]:
+            WARNINGS.append("Tables in %s ignored; the tables come from %s"
+                            % (os.path.basename(supp_docx), os.path.basename(tables_docx)))
+        items["tables"] = _collect_tables(read_blocks(tables_docx, cfg["tracked_changes"]), style)
 
     # ---- write the story ----------------------------------------------------------
     tg = Tagged()
