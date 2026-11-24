@@ -409,6 +409,7 @@ class Tagged:
             runs[-1] = (runs[-1][0].rstrip(), runs[-1][1])
         if ITALIC_ET_AL:
             runs = italicize(runs, r"\bet al\.")
+        runs = subscript_auto(runs)
         out = "<pstyle:%s>" % pstyle
         for text, f in runs:
             text = fix_typography(text).replace("\n", LINE_BREAK)
@@ -683,6 +684,27 @@ def extract_caption_images(docx_path, blocks, number_of, out_dir, name):
 # ----------------------------------------------------------------------------
 # Manuscript structure
 # ----------------------------------------------------------------------------
+
+# Text set as a subscript wherever it appears, typed as one or not: (pattern, group).
+AUTO_SUBSCRIPTS = [(r"\bOD(600)(?!\d)", 1)]   # OD600 -> OD with a subscript 600
+
+
+def subscript_auto(runs):
+    """Make the AUTO_SUBSCRIPTS matches subscript (also across Word's run boundaries)."""
+    text = "".join(t for t, _ in runs)
+    marks = set()
+    for pattern, group in AUTO_SUBSCRIPTS:
+        for m in re.finditer(pattern, text):
+            marks.update(range(m.start(group), m.end(group)))
+    if not marks:
+        return runs
+    out, pos = [], 0
+    for t, f in runs:
+        for c in t:
+            out.append((c, dict(f, sub=True, sup=False) if pos in marks else f))
+            pos += 1
+    return merge_runs(out)
+
 
 def italicize(runs, pattern):
     """Split runs so that matches of pattern are italic."""
@@ -1211,7 +1233,7 @@ def _cell_runs(ps):
     apart from look-alike characters the font lacks)."""
     out = []
     for k, p in enumerate(ps):
-        runs = [(fix_typography(t), f) for t, f in merge_runs(p["runs"]) if t]
+        runs = [(fix_typography(t), f) for t, f in subscript_auto(merge_runs(p["runs"])) if t]
         if runs:   # trim the paragraph's outer white space, as ptext() does
             runs[0] = (runs[0][0].lstrip(), runs[0][1])
             runs[-1] = (runs[-1][0].rstrip(), runs[-1][1])

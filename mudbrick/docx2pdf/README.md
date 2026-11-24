@@ -221,6 +221,9 @@ a missing legend, notes like `[jhd stopped here]`, or several running titles.
   directly under a section heading (`subheadingSpaceAbove`).
 * References are 3 pt apart (`referenceSpacing`), and that spacing is never widened to
   fill out a column.
+* Subscripts are set as subscript and raised 2 pt (`subscriptShift` in `layout.jsx`).
+  "OD600" always gets a subscript 600, even when typed plainly (`AUTO_SUBSCRIPTS` in
+  `convert.py`).
 * Figure references in the text ("Figure 1A", "Figures 2A, 3B-D and S4", "Fig. S2",
   "Supplementary Figure 3") are set in semibold, through a "Figure reference" character
   style that can be restyled in InDesign (`figureRefStyle`; `null` leaves them as typed).

@@ -325,6 +325,16 @@ class Docx2PdfThreeDocuments(unittest.TestCase):
         self.assertIn("a note under the table", si)
         self.assertTrue(any("ignored" in w for w in m["warnings"]))  # supplement's own table
 
+    def test_od600_subscript(self):
+        flags = lambda runs: [(t, bool(f.get("sub"))) for t, f in convert.subscript_auto(runs)]
+        self.assertEqual(flags([("grown to OD600 0.3", {})]),
+                         [("grown to OD", False), ("600", True), (" 0.3", False)])
+        self.assertEqual(flags([("an OD", {}), ("600", {"b": True})]), [("an OD", False), ("600", True)])
+        self.assertEqual(flags([("OD6000 and GOD600", {})]), [("OD6000 and GOD600", False)])
+        tg = convert.Tagged()
+        tg.para("Body", [("OD600 of 0.5", {})])
+        self.assertIn("OD<cstyle:cs_sub>600<cstyle:>", tg.paras[0])
+
     def test_supplement_labels_follow_manuscript_citations(self):
         cite = lambda text: [{"runs": [(text, {})]}]
         self.assertEqual(convert.supplement_label_style(cite("as in Figure S2 and Table S1")), "S")

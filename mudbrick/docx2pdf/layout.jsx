@@ -31,6 +31,7 @@ var CFG = {
     subheadingSpaceAbove: 0,   // extra space above subheadings, on top of the paragraph spacing (pt)
     referenceSpacing: 3,       // space between references (pt); never widened to fill columns
     figureRefStyle: "Semibold", // figure references in the text ("Figure 1B, S1C"); null: leave as typed
+    subscriptShift: 2,         // every subscript is raised this much (pt) from InDesign's position
     fillColumns: true,         // fill gaps left when a heading moves to the next column
     columnFillLimit: 12,       // most extra space added between two paragraphs to do so (pt)
     figurePosition: "top",     // "top" or "bottom" of the page after first citation
@@ -153,7 +154,7 @@ function cstyle(name) {
     var weight = has.b ? "Bold" : (has.sb ? SEMIBOLD : "");
     if (weight || has.i) p.fontStyle = weight ? (has.i ? weight + " Italic" : weight) : "Italic";
     if (has.sup) p.position = Position.SUPERSCRIPT;
-    if (has.sub) p.position = Position.SUBSCRIPT;
+    if (has.sub) { p.position = Position.SUBSCRIPT; p.baselineShift = CFG.subscriptShift; }
     if (has.u) { p.underline = true; p.underlineOffset = 1.5; }
     if (has.mono) { p.appliedFont = "Courier New"; if (!p.fontStyle) p.fontStyle = "Regular"; }
     if (has.sym) { p.appliedFont = CFG.fallbackFont; if (!p.fontStyle || !hasFont(CFG.fallbackFont, p.fontStyle)) p.fontStyle = "Regular"; }
@@ -853,7 +854,7 @@ function applyRuns(text, runs) {
                 if (f[k] == "b") b = true;
                 else if (f[k] == "i") it = true;
                 else if (f[k] == "sup") ch.position = Position.SUPERSCRIPT;
-                else if (f[k] == "sub") ch.position = Position.SUBSCRIPT;
+                else if (f[k] == "sub") { ch.position = Position.SUBSCRIPT; ch.baselineShift = CFG.subscriptShift; }
             }
             if (b || it) ch.fontStyle = b && it ? "Bold Italic" : b ? "Bold" : "Italic";
         }
