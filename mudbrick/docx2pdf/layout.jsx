@@ -26,9 +26,12 @@ var CFG = {
     ruleGap: 6,                // legend -> separator rule
     wrapGap: 12,               // separator rule -> body text
     minLegendLines: 5,         // keep at least this much legend with its figure
-    minFigScale: 0.9,          // figures may shrink to this to keep more legend on the page
     paragraphSpacing: 6,       // space between body paragraphs (pt)
-    headingSpaceAbove: 10,     // space above section headings and subheadings (pt)
+    headingSpaceAbove: 10,     // space above section headings (pt)
+    subheadingSpaceAbove: 0,   // extra space above subheadings, on top of the paragraph spacing (pt)
+    referenceSpacing: 3,       // space between references (pt); never widened to fill columns
+    figureRefStyle: "Semibold", // figure references in the text ("Figure 1B, S1C"); null: leave as typed
+    subscriptShift: 2,         // every subscript is raised this much (pt) from InDesign's position
     fillColumns: true,         // fill gaps left when a heading moves to the next column
     columnFillLimit: 12,       // most extra space added between two paragraphs to do so (pt)
     figurePosition: "top",     // "top" or "bottom" of the page after first citation
@@ -121,8 +124,8 @@ var COL_W = (CFG.pageW - CFG.inside - CFG.outside - CFG.gutter) / 2;
 var HEAD_GAP = Math.max(0, CFG.headingSpaceAbove - CFG.paragraphSpacing);
 pstyle("H1",         { fontStyle: "Bold", pointSize: 12, leading: 14.4, fillColor: RED, keepWithNext: 2, keepAllLinesTogether: true, spaceBefore: HEAD_GAP });
 pstyle("H1Back",     { fontStyle: "Bold", pointSize: 12, leading: 14.4, fillColor: RED, keepWithNext: 2, keepAllLinesTogether: true, spaceBefore: HEAD_GAP });
-pstyle("H2",         { fontStyle: "Bold", keepWithNext: 2, keepAllLinesTogether: true, spaceBefore: HEAD_GAP });
-pstyle("Reference",  { justification: J, pointSize: 8, leading: 9.6, spaceAfter: 6.4,
+pstyle("H2",         { fontStyle: "Bold", keepWithNext: 2, keepAllLinesTogether: true, spaceBefore: CFG.subheadingSpaceAbove });
+pstyle("Reference",  { justification: J, pointSize: 8, leading: 9.6, spaceAfter: CFG.referenceSpacing,
                        keepAllLinesTogether: true });
 pstyle("Title",      { fontStyle: "Bold", pointSize: 16, leading: 19.2, justification: C });
 pstyle("Authors",    { fontStyle: "Bold", pointSize: 12, leading: 14.4, justification: C, spaceBefore: 54 });
@@ -151,7 +154,7 @@ function cstyle(name) {
     var weight = has.b ? "Bold" : (has.sb ? SEMIBOLD : "");
     if (weight || has.i) p.fontStyle = weight ? (has.i ? weight + " Italic" : weight) : "Italic";
     if (has.sup) p.position = Position.SUPERSCRIPT;
-    if (has.sub) p.position = Position.SUBSCRIPT;
+    if (has.sub) { p.position = Position.SUBSCRIPT; p.baselineShift = CFG.subscriptShift; }
     if (has.u) { p.underline = true; p.underlineOffset = 1.5; }
     if (has.mono) { p.appliedFont = "Courier New"; if (!p.fontStyle) p.fontStyle = "Regular"; }
     if (has.sym) { p.appliedFont = CFG.fallbackFont; if (!p.fontStyle || !hasFont(CFG.fallbackFont, p.fontStyle)) p.fontStyle = "Regular"; }
@@ -181,12 +184,8 @@ pstyle("SIMovieTitle", span({ fontStyle: SEMIBOLD, pointSize: 9, leading: 10.8, 
                               keepWithNext: 2, keepAllLinesTogether: true }));
 pstyle("SIMovie",    span({ pointSize: 9, leading: 10.8, justification: J, spaceAfter: 8,
                             keepAllLinesTogether: true }));
-// A supplementary figure and its caption stay on one page: the figure keeps with the
-// caption, and the caption is never split.
-pstyle("SIFigure",   span({ justification: C, leading: Leading.AUTO, spaceBefore: 6, spaceAfter: 6,
-                            keepWithNext: 1 }));
-pstyle("SIFigureNewPage", span({ justification: C, leading: Leading.AUTO, spaceAfter: 6,
-                                 keepWithNext: 1, startParagraph: StartParagraph.NEXT_PAGE }));
+// Marks where the supplementary figure pages go (replaced by buildFigurePages()).
+pstyle("SIFigurePages", span({}));
 pstyle("SICaption",  span({ pointSize: 9, leading: 10.8, spaceBefore: 2, spaceAfter: 12,
                             justification: J, keepAllLinesTogether: true }));
 pstyle("SICaptionTitle", span({ fontStyle: SEMIBOLD, pointSize: 9, leading: 10.8, justification: J,
@@ -316,17 +315,30 @@ function layoutTitlePage() {
 }
 
 // ---------------------------------------------------------------------------
-// Body: two-column story threaded over as many pages as needed
+// Body: two-column story threaded over as many pages as needed. In the paper each
+// column is its own text frame (left -> right -> next page), so each column's height can
+// be changed by hand afterwards. The supplement keeps one two-column frame per page,
+// because its captions, wide tables and headings span both columns.
 // ---------------------------------------------------------------------------
 function addBodyPage(prevFrame, page) {
     page = page || doc.pages.add(LocationOptions.AT_END);
-    var fr = page.textFrames.add({ geometricBounds: textBox(page) });
-    fr.textFramePreferences.textColumnCount = 2;
-    fr.textFramePreferences.textColumnGutter = CFG.gutter;
-    if (prevFrame) prevFrame.nextTextFrame = fr;
-    return fr;
+    var tb = textBox(page);
+    if (SI) {
+        var fr = page.textFrames.add({ geometricBounds: tb });
+        fr.textFramePreferences.textColumnCount = 2;
+        fr.textFramePreferences.textColumnGutter = CFG.gutter;
+        if (prevFrame) prevFrame.nextTextFrame = fr;
+        return fr;
+    }
+    var colW = (tb[3] - tb[1] - CFG.gutter) / 2;
+    var left = page.textFrames.add({ geometricBounds: [tb[0], tb[1], tb[2], tb[1] + colW] });
+    var right = page.textFrames.add({ geometricBounds: [tb[0], tb[3] - colW, tb[2], tb[3]] });
+    if (prevFrame) prevFrame.nextTextFrame = left;
+    left.nextTextFrame = right;
+    return right;   // the last frame of the thread
 }
 var first = addBodyPage(null);   // the body (or supplement content) starts on page 2
+if (!SI) first = first.previousTextFrame;   // the page's left column
 first.place(File(BUILD + (SI ? "/si.txt" : "/body.txt")));
 var story = first.parentStory;
 
@@ -372,6 +384,35 @@ function placeEquations() {
 }
 placeEquations();
 flow();
+
+// Figure references in the paper's body text ("Figure 1A", "Figures 2A, 3B-D and S4",
+// "Fig. S2", "Figs. 4E-F") get the "Figure reference" character style (semibold by
+// default). Done before the figures are laid out, since it makes the text a little wider.
+// A reference written in lowercase ("figure 3B") is reported, not changed.
+var FIGREF_GREP = "(?:[Ss]upplementa(?:l|ry)\\s+)?(?:[Ff]igures?|[Ff]igs?\\.)\\s*S?\\d+[A-Z]?(?:\\s*[-\\x{2013}]\\s*(?:S?\\d+[A-Z]?|[A-Z]\\b))?" +
+    "(?:(?:,\\s*|,?\\s+and\\s+)S?\\d+[A-Z]?(?:\\s*[-\\x{2013}]\\s*(?:S?\\d+[A-Z]?|[A-Z]\\b))?)*";
+function styleFigureReferences() {
+    if (!CFG.figureRefStyle) return;
+    var style = CFG.figureRefStyle == "Semibold" ? SEMIBOLD : CFG.figureRefStyle;
+    var cs = doc.characterStyles.itemByName("Figure reference");
+    if (!cs.isValid) cs = doc.characterStyles.add({ name: "Figure reference" });
+    cs.fontStyle = style;
+    var BODY = { "Body": 1, "BodyTight": 1 }, n = 0, lower = [];
+    app.findGrepPreferences = NothingEnum.NOTHING;
+    app.findGrepPreferences.findWhat = FIGREF_GREP;
+    var hits = story.findGrep();
+    app.findGrepPreferences = NothingEnum.NOTHING;
+    for (var i = 0; i < hits.length; i++) {
+        var h = hits[i];
+        if (!BODY[h.appliedParagraphStyle.name]) continue;
+        h.appliedCharacterStyle = cs; n++;
+        if (/^f/.test(h.contents)) lower.push("“" + h.contents + "”");
+    }
+    if (n) LOG.push("Figure references set in " + style + ": " + n);
+    if (lower.length)
+        LOG.push("WARNING: figure reference(s) in lowercase, probably should be capitalised: " + lower.join(", "));
+}
+if (!SI) { styleFigureReferences(); flow(); }
 
 // ---------------------------------------------------------------------------
 // Figures
@@ -425,16 +466,18 @@ function rule(page, y, x1, x2) {
     return l;
 }
 
-// Shrink the body-text frame on page pi to the space figures leave free.
+// Shrink the body-text frames (both columns) on page pi to the space figures leave free.
 // (Text wrap is avoided: InDesign drops some placed AI/PDF art under a wrap on export.)
 function reserve(pi) {
-    var tb = textBox(doc.pages[pi]), sl = slot(pi), fr = null, tc = story.textContainers;
+    var tb = textBox(doc.pages[pi]), sl = slot(pi), frs = [], tc = story.textContainers;
     for (var i = 0; i < tc.length; i++)
-        if (tc[i].parentPage && tc[i].parentPage.documentOffset == pi) fr = tc[i];
-    if (!fr) return;
+        if (tc[i].parentPage && tc[i].parentPage.documentOffset == pi) frs.push(tc[i]);
     var y1 = tb[0] + sl.top, y2 = tb[2] - sl.bottom;
-    if (y2 - y1 < 3 * 12) fr.remove();          // thread skips straight to the next page
-    else fr.geometricBounds = [y1, tb[1], y2, tb[3]];
+    for (var k = frs.length - 1; k >= 0; k--) {
+        var b = frs[k].geometricBounds;
+        if (y2 - y1 < 3 * 12) frs[k].remove();  // thread skips straight to the next page
+        else frs[k].geometricBounds = [y1, b[1], y2, b[3]];
+    }
 }
 
 // Text frame holding a legend.
@@ -451,6 +494,21 @@ function usedHeight(f) {
     var ls = f.lines;
     if (!ls.length) return 0;
     return ls[ls.length - 1].baseline - f.geometricBounds[0] + 3;
+}
+
+// Put a frame's placed artwork so its top-left corner sits (ox, oy) from the frame's
+// top-left corner (negative = the artwork starts above/left of the frame, i.e. it is
+// trimmed). Never set a graphic's geometricBounds directly: with page rulers InDesign
+// reads and writes a placed graphic's bounds relative to the spread, not its page, so
+// on a right-hand page the artwork lands on the facing page, under that page's text,
+// while the empty frame stays put.
+function positionGraphic(rect, ox, oy) {
+    var g = rect.allGraphics[0];
+    var where = [AnchorPoint.TOP_LEFT_ANCHOR, BoundingBoxLimits.GEOMETRIC_PATH_BOUNDS];
+    var f = rect.resolve(where, CoordinateSpaces.PASTEBOARD_COORDINATES)[0];
+    var c = g.resolve(where, CoordinateSpaces.PASTEBOARD_COORDINATES)[0];
+    g.move(undefined, [f[0] + ox - c[0], f[1] + oy - c[1]]);
+    return g;
 }
 
 function placeFigure(fig, forcePi) {
@@ -498,7 +556,16 @@ function placeFigure(fig, forcePi) {
         rect.strokeWeight = 0.5;
     }
     var natW = fullW * (crop[2] - crop[0]), natH = fullH * (crop[3] - crop[1]);
-    var s = Math.min(1, W / natW);
+    // Never resized: scaling the artwork would change its font sizes. Artwork wider
+    // than the text column is centred and extends into the side margins.
+    var s = 1, wideWarning = null;
+    if (file && natW > W + 0.5) {
+        var side = (natW - W) / 2;
+        wideWarning = ("WARNING: Figure " + fig.num + " artwork is " + Math.round(natW) + " pt wide, " +
+                 Math.round(natW - W) + " pt wider than the " + Math.round(W) + "-pt text column; " +
+                 "it overprints " + Math.round(side) + " pt into each side margin" +
+                 (side > Math.min(tb[1], CFG.pageW - tb[3]) ? " and runs off the page edge" : "") + ".");
+    }
 
     // Decide how big it is and how much legend fits with it.
     var extras = CFG.figGap + CFG.ruleGap + CFG.wrapGap;
@@ -507,14 +574,16 @@ function placeFigure(fig, forcePi) {
     if (room < natH * s * 0.6 + minLegend && (slot(pi).top || slot(pi).bottom)) {
         rect.remove(); return placeFigure(fig, pi + 1);
     }
-    if (natH * s + legendH > room)      // shrink a little to keep the whole legend
-        s *= Math.min(1, Math.max(CFG.minFigScale, (room - legendH) / (natH * s)));
-    if (natH * s + minLegend > room)    // shrink further to keep some legend with it
-        s *= (room - minLegend) / (natH * s);
     var figW = natW * s, figH = natH * s;
+    var legendRoom = room - figH;
+    if (legendRoom < lineH * 1.5) {
+        LOG.push("WARNING: Figure " + fig.num + " artwork is " + Math.round(natH) + " pt tall and leaves " +
+                 "no room for its legend on page " + (pi + 1) + "; it overprints the page foot.");
+        legendRoom = lineH * 1.5;
+    }
 
     // Set the legend; panels that do not fit continue on the next page.
-    var lf = legendFrame(page, tb, room - figH, legendFile);
+    var lf = legendFrame(page, tb, legendRoom, legendFile);
     var split = lf.overflows;
     if (split) {   // cut at the last line that fits; the rest continues on the next page
         var keep = lf.characters.length;
@@ -533,14 +602,10 @@ function placeFigure(fig, forcePi) {
     var x0 = tb[1] + (W - figW) / 2;
 
     rect.geometricBounds = [y0, x0, y0 + figH, x0 + figW];
-    if (file) {   // scale the whole image, then shift so the content box fills the frame
-        var gw = fullW * s, gh = fullH * s;
-        var gy = y0 - crop[1] * gh, gx = x0 - crop[0] * gw;
-        rect.allGraphics[0].geometricBounds = [gy, gx, gy + gh, gx + gw];
-    }
+    var ox = -crop[0] * fullW, oy = -crop[1] * fullH;   // at 100 %: shift so the content fills the frame
+    if (file) positionGraphic(rect, ox, oy);
     lf.geometricBounds = [y0 + figH + CFG.figGap, tb[1], y0 + blockH, tb[3]];
-    if (file) PLACED.push({ page: page, file: file, frame: rect.geometricBounds,
-                            graphic: rect.allGraphics[0].geometricBounds, rect: rect });
+    if (file) PLACED.push({ page: page, file: file, frame: rect.geometricBounds, ox: ox, oy: oy, rect: rect });
 
     var fullPage = (avail - slot(pi).top - slot(pi).bottom - blockH - extras) < 3 * 12;
     if (atTop) {
@@ -555,6 +620,7 @@ function placeFigure(fig, forcePi) {
     reserve(pi);
 
     flow();
+    if (wideWarning) LOG.push(wideWarning);
     LOG.push("Figure " + fig.num + ": cited p" + (citePage + 1) + ", placed p" + (pi + 1) +
              (atTop ? " top" : " bottom") + ", " + Math.round(100 * s) + "% of file size" +
              (split ? ", legend continued on p" + (pi + 2) : ""));
@@ -599,7 +665,7 @@ for (var pf = 0; pf < PLACED.length; pf++) {
     figureStroke(nr);
     app.pdfPlacePreferences.pdfCrop = PDFCrop.CROP_PDF;
     nr.place(P.file);
-    nr.allGraphics[0].geometricBounds = P.graphic;
+    positionGraphic(nr, P.ox, P.oy);
 }
 
 // ---------------------------------------------------------------------------
@@ -607,31 +673,36 @@ for (var pf = 0; pf < PLACED.length; pf++) {
 // ---------------------------------------------------------------------------
 function buildSupplement() {
     var tb = textBox(doc.pages[0]), W = tb[3] - tb[1], CW = (W - CFG.gutter) / 2;
-    var maxH = tb[2] - tb[0];   // a whole page; siFigure subtracts the caption's height
+    var figuresFirst = /^\[\[FIGPAGES\]\]/.test(story.contents);
+    if (figuresFirst) buildFigurePages();   // before the tables, so they flow on final pages
     for (var guard = 0; guard < 500; guard++) {
         app.findGrepPreferences = NothingEnum.NOTHING;
-        app.findGrepPreferences.findWhat = "\\[\\[(FIG|TABLE):\\d+\\]\\]";
+        app.findGrepPreferences.findWhat = "\\[\\[TABLE:\\d+\\]\\]";
         var hits = story.findGrep();
         if (!hits.length) break;
-        var hit = hits[0], m = hit.contents.match(/(FIG|TABLE):(\d+)/);
+        var hit = hits[0], m = hit.contents.match(/TABLE:(\d+)/);
         var para = hit.paragraphs[0];
         hit.remove();
-        var ip = para.insertionPoints[0];
-        if (m[1] == "FIG") siFigure(ip, M.si_figures[+m[2]], W, maxH);
-        else {
-            var t = M.tables[+m[2]];
-            siTable(ip, t, t.wide ? W : CW);
-            flow();
-            keepTableWithCaption(para, t.wide, CW);
-        }
+        var t = M.tables[+m[1]];
+        siTable(para.insertionPoints[0], t, t.wide ? W : CW);
+        flow();
+        keepTableWithCaption(para, t.wide, CW);
         flow();
     }
     app.findGrepPreferences = NothingEnum.NOTHING;
+    if (!figuresFirst) buildFigurePages();
+    // story pages left empty at the end (e.g. the marker's old page) are removed
+    doc.recompose();
+    for (var e = story.textContainers.length - 1; e > 0; e--) {
+        var c = story.textContainers[e];
+        if (c.characters.length || !c.parentPage || c.parentPage.allPageItems.length > 1) break;
+        c.parentPage.remove();
+    }
     if (START_PAGE > 0)   // continue the main paper's page numbers
         doc.sections[0].properties = { continueNumbering: false, pageNumberStart: START_PAGE,
                                        includeSectionPrefix: false };
     else
-        doc.sections[0].properties = { sectionPrefix: "S", includeSectionPrefix: true };
+        doc.sections[0].properties = { sectionPrefix: M.page_prefix || "SI-", includeSectionPrefix: true };
     LOG.push("Supplement: " + M.si_figures.length + " figures, " + M.tables.length + " tables");
 }
 
@@ -670,28 +741,125 @@ function keepTableWithCaption(tablePara, wide, CW) {
     }
 }
 
-function siFigure(ip, fig, W, maxH) {
+// Supplementary figures get pages of their own. On each page the figure and its legend
+// are separate, unlinked frames (the legend is not part of the supplement's story), so
+// either can be moved or resized by hand. The figure is never scaled (that would change
+// its font sizes): trimmed to its artwork, centred on the text column at the top of the
+// page, with the legend right below it. A figure too big for the page overprints the
+// margins or its legend, with a warning saying by how much.
+function siFigurePage(page, fig, first) {
+    var tb = textBox(page), W = tb[3] - tb[1], y = tb[0], n = fig.num;
+    if (first) {   // section heading, a frame of its own
+        var hf = page.textFrames.add({ geometricBounds: [y, tb[1], y + 60, tb[3]] });
+        hf.place(File(BUILD + "/si_figures_head.txt"));
+        hf.paragraphs.everyItem().startParagraph = StartParagraph.ANYWHERE;
+        doc.recompose();
+        var hh = usedHeight(hf);
+        hf.geometricBounds = [y, tb[1], y + hh, tb[3]];
+        y += hh + 6;
+    }
     app.pdfPlacePreferences.pdfCrop = PDFCrop.CROP_PDF;
-    var para = ip.paragraphs[0];
-    // room below where the figure starts (e.g. under a section header); a whole page if
-    // that's too little, since the figure then moves on with its caption
-    var tb = textBox(doc.pages[0]), y0 = tb[0];
-    if (para.parentTextFrames.length && para.lines.length) y0 = para.lines[0].baseline - 12;
-    var capH = captionHeight(para, W);
-    var room = tb[2] - y0 - capH - 6 - 6 - 8;
-    if (room < (maxH - capH) * 0.4) room = maxH - capH - 20;
-    var g = ip.place(File(fig.file))[0], rect = g.parent;
-    var crop = fig.crop || [0, 0, 1, 1], gb = g.geometricBounds;
+    app.pdfPlacePreferences.transparentBackground = true;
+    var tmp = page.rectangles.add({ geometricBounds: [0, 0, 10, 10] });   // natural size
+    var gb = tmp.place(File(fig.file))[0].geometricBounds;
+    tmp.remove();
+    var crop = fig.crop || [0, 0, 1, 1];
     var fullW = gb[3] - gb[1], fullH = gb[2] - gb[0];
     var natW = fullW * (crop[2] - crop[0]), natH = fullH * (crop[3] - crop[1]);
-    var s = Math.min(W / natW, Math.max(room, 72) / natH);
-    var rb = rect.geometricBounds;
-    rect.geometricBounds = [rb[0], rb[1], rb[0] + natH * s, rb[1] + natW * s];
-    // scale the whole image, then shift so the trimmed content fills the frame
-    rb = rect.geometricBounds;
-    var gw = fullW * s, gh = fullH * s, gy = rb[0] - crop[1] * gh, gx = rb[1] - crop[0] * gw;
-    rect.allGraphics[0].geometricBounds = [gy, gx, gy + gh, gx + gw];
+
+    var lf = legendFrame(page, tb, tb[2] - tb[0], File(BUILD + "/" + fig.legend));
+    if (lf.overflows) LOG.push("WARNING: Supplementary Figure " + n + " legend is longer than a page.");
+    var legendH = usedHeight(lf);
+    var figTop = y, legTop = figTop + natH + CFG.figGap;
+    var over = legTop + legendH - tb[2], up = 0;
+    if (over > 0) {   // first use the empty top margin, then run into the legend
+        up = Math.min(over, Math.max(0, figTop - 18));
+        figTop -= up; legTop -= up; over -= up;
+    }
+    if (over > 0) legTop = tb[2] - legendH;
+    lf.geometricBounds = [legTop, tb[1], legTop + legendH, tb[3]];
+
+    var x0 = tb[1] + (W - natW) / 2;
+    var rect = page.rectangles.add({ geometricBounds: [figTop, x0, figTop + natH, x0 + natW] });
+    rect.place(File(fig.file));
+    var ox = -crop[0] * fullW, oy = -crop[1] * fullH;
+    positionGraphic(rect, ox, oy);
     figureStroke(rect);
+    // the final frame comes from the re-place pass after the layout, as for main figures
+    PLACED.push({ page: page, file: File(fig.file), frame: rect.geometricBounds, ox: ox, oy: oy, rect: rect });
+
+    if (natW > W + 0.5) {
+        var side = (natW - W) / 2;
+        LOG.push("WARNING: Supplementary Figure " + n + " artwork is " + Math.round(natW) + " pt wide, " +
+                 Math.round(natW - W) + " pt wider than the " + Math.round(W) + "-pt text column; it overprints " +
+                 Math.round(side) + " pt into each side margin" +
+                 (side > Math.min(tb[1], CFG.pageW - tb[3]) ? " and runs off the page edge" : "") + ".");
+    }
+    if (up > 0.5 || over > 0.5)
+        LOG.push("WARNING: Supplementary Figure " + n + " artwork is " + Math.round(natH) + " pt tall, " +
+                 Math.round(up + Math.max(0, over)) + " pt more than fits with its legend; it overprints " +
+                 (up > 0.5 ? Math.round(up) + " pt of the top margin" : "") +
+                 (up > 0.5 && over > 0.5 ? " and " : "") +
+                 (over > 0.5 ? Math.round(over) + " pt of its legend" : "") + ".");
+}
+
+// Replace the [[FIGPAGES]] marker with one page per supplementary figure. Pages go right
+// before the story page holding the marker if it starts that page, otherwise after it
+// (and the text after the marker then starts on the next story page).
+function buildFigurePages() {
+    app.findGrepPreferences = NothingEnum.NOTHING;
+    app.findGrepPreferences.findWhat = "\\[\\[FIGPAGES\\]\\]";
+    var hits = story.findGrep();
+    app.findGrepPreferences = NothingEnum.NOTHING;
+    if (!hits.length) return;
+    var para = hits[0].paragraphs[0], frames = para.parentTextFrames;
+    var fr = frames.length ? frames[0] : null;
+    var anchor = fr ? fr.parentPage : doc.pages[doc.pages.length - 1];
+    var atStart = !fr || para.index == fr.characters[0].index;
+    var after = story.paragraphs.nextItem(para);
+    para.remove();
+    if (after && after.isValid && !atStart) after.startParagraph = StartParagraph.NEXT_FRAME;
+    var figs = M.si_figures, ref = anchor, loc = atStart ? LocationOptions.BEFORE : LocationOptions.AFTER;
+    var pages = [];
+    for (var i = 0; i < figs.length; i++) {
+        var pg = doc.pages.add(loc, ref);
+        pages.push(pg); ref = pg; loc = LocationOptions.AFTER;
+    }
+    // inserted pages can swap later pages between left and right: refit the story frames
+    for (var k = 0; k < story.textContainers.length; k++) {
+        var c = story.textContainers[k];
+        if (c.parentPage) c.geometricBounds = textBox(c.parentPage);
+    }
+    flow();
+    for (var j = 0; j < figs.length; j++) siFigurePage(pages[j], figs[j], j == 0);
+    // nothing left in the story (no tables or movies): drop its empty page(s)
+    if (!/\S/.test(story.contents)) {
+        var tc = story.textContainers;
+        for (var e = tc.length - 1; e >= 0; e--)
+            if (tc[e].parentPage && doc.pages.length > 1) tc[e].parentPage.remove();
+    }
+}
+
+// Bold / italic / superscript / subscript of a table cell's text, as typed in Word.
+// runs: [[text, flags]] covering the cell's text exactly.
+function applyRuns(text, runs) {
+    if (!runs) return;
+    var pos = 0;
+    for (var i = 0; i < runs.length; i++) {
+        var n = runs[i][0].length, f = runs[i][1];
+        if (n && f.length) {
+            var ch = text.characters.itemByRange(pos, pos + n - 1);
+            var b = false, it = false;
+            for (var k = 0; k < f.length; k++) {
+                if (f[k] == "b") b = true;
+                else if (f[k] == "i") it = true;
+                else if (f[k] == "sup") ch.position = Position.SUPERSCRIPT;
+                else if (f[k] == "sub") { ch.position = Position.SUBSCRIPT; ch.baselineShift = CFG.subscriptShift; }
+            }
+            if (b || it) ch.fontStyle = b && it ? "Bold Italic" : b ? "Bold" : "Italic";
+        }
+        pos += n;
+    }
 }
 
 function siTable(ip, t, W) {
@@ -708,6 +876,7 @@ function siTable(ip, t, W) {
             cell.contents = row[c].t;
             cell.texts[0].appliedParagraphStyle = cellStyle;
             if (row[c].b) cell.texts[0].fontStyle = "Bold";
+            else applyRuns(cell.texts[0], row[c].runs);
             if (row[c].span > 1) merges.push([r, col, Math.min(ncols, col + row[c].span) - 1]);
             col += row[c].span;
         }
@@ -715,18 +884,31 @@ function siTable(ip, t, W) {
     }
     for (i = merges.length - 1; i >= 0; i--)   // right-to-left, bottom-up keeps indices valid
         tbl.rows[merges[i][0]].cells[merges[i][1]].merge(tbl.rows[merges[i][0]].cells[merges[i][2]]);
-    // Minimal style: a rule at the top and bottom of the table and under each row of
-    // column headings; section rows that span the table get a light band. No other lines.
-    var allBold = true;
-    for (c = 0; c < t.rows[0].length; c++) if (!t.rows[0][c].b && t.rows[0][c].t) allBold = false;
-    // repeat the first row when the table breaks (convert it; setting headerRowCount
-    // would insert a new, empty header row instead)
-    if (allBold && nrows > 2) tbl.rows[0].rowType = RowTypes.HEADER_ROW;
+    // Minimal style: a rule at the top and bottom of the table and one under the column
+    // headings; a group heading spanning several columns (e.g. "tRNA" over "P-site" and
+    // "A-site") gets a short rule under just its columns. Section rows that span the whole
+    // table get a light band. No other lines. Row labels (first column) are left-aligned,
+    // the other columns centred.
+    // Heading rows: the top rows whose first cell is empty or bold and that have some bold
+    // text (rows spanning the whole table are section bands, not headings).
+    var hdr = 0;
+    for (r = 0; r < nrows - 1; r++) {
+        var hr = t.rows[r], firstOk = !hr[0].t || hr[0].b, someBold = false;
+        for (c = 0; c < hr.length; c++) if (hr[c].t && hr[c].b) someBold = true;
+        if (hr.length > 1 && firstOk && someBold) hdr = r + 1; else break;
+    }
     var cells = tbl.cells.everyItem();
     cells.topInset = cells.bottomInset = 2;
     cells.leftInset = cells.rightInset = 3;
     cells.topEdgeStrokeWeight = cells.bottomEdgeStrokeWeight = 0;
     cells.leftEdgeStrokeWeight = cells.rightEdgeStrokeWeight = 0;
+    for (r = 0; r < tbl.rows.length; r++)
+        for (c = 0; c < tbl.rows[r].cells.length; c++) {
+            var cl = tbl.rows[r].cells[c];
+            cl.texts[0].justification = c == 0 && cl.columnSpan == 1 ? Justification.LEFT_ALIGN
+                                                                    : Justification.CENTER_ALIGN;
+            if (r < hdr) cl.verticalJustification = VerticalJustification.BOTTOM_ALIGN;
+        }
     for (r = 0; r < nrows; r++) {
         var row = t.rows[r], rowCells = tbl.rows[r].cells.everyItem(), bold = true, any = false;
         for (c = 0; c < row.length; c++) { if (row[c].t) { any = true; if (!row[c].b) bold = false; } }
@@ -734,10 +916,25 @@ function siTable(ip, t, W) {
         if (band && bold && any) {            // section row, e.g. "Overall performance"
             rowCells.fillColor = BLACK; rowCells.fillTint = 12;
             rowCells.topInset = rowCells.bottomInset = 3;
-        } else if (bold && any && row.length > 1) {   // column headings
-            rowCells.bottomEdgeStrokeWeight = 0.5;
-            rowCells.bottomEdgeStrokeColor = BLACK; rowCells.bottomEdgeStrokeTint = 100;
+            rowCells.texts.everyItem().justification = Justification.LEFT_ALIGN;
         }
+    }
+    if (hdr) {
+        var under = tbl.rows[hdr - 1].cells.everyItem();   // rule under the headings
+        under.bottomEdgeStrokeWeight = 0.5; under.bottomEdgeStrokeColor = BLACK;
+        under.bottomEdgeStrokeTint = 100;
+        for (r = 0; r < hdr - 1; r++)                       // short rules under group headings
+            for (c = 0; c < tbl.rows[r].cells.length; c++) {
+                var g = tbl.rows[r].cells[c];
+                if (g.columnSpan > 1 && g.contents != "") {
+                    g.bottomEdgeStrokeWeight = 0.4; g.bottomEdgeStrokeColor = BLACK;
+                    g.bottomEdgeStrokeTint = 100;
+                }
+            }
+        // repeat the headings when the table breaks (convert the rows; setting
+        // headerRowCount would insert new, empty header rows instead)
+        if (nrows > hdr + 1)
+            for (r = 0; r < hdr; r++) tbl.rows[r].rowType = RowTypes.HEADER_ROW;
     }
     var top = tbl.rows[0].cells.everyItem(), bottom = tbl.rows[nrows - 1].cells.everyItem();
     top.topEdgeStrokeWeight = 0.75; top.topEdgeStrokeColor = BLACK; top.topEdgeStrokeTint = 100;
@@ -770,7 +967,7 @@ doc.recompose();
 // with its first lines (leaving more than a line empty), the gap is shared out between
 // that column's ordinary paragraphs only, so headings keep exactly their usual spacing.
 // Columns with the normal under-one-line remainder are left alone.
-var FILLABLE = { "Body": 1, "BodyTight": 1, "Equation": 1, "EquationTeX": 1, "Reference": 1 };
+var FILLABLE = { "Body": 1, "BodyTight": 1, "Equation": 1, "EquationTeX": 1 };   // not references: their spacing stays fixed
 function fillColumnGaps() {
     var conts = story.textContainers, filled = 0;
     for (var k = 0; k < conts.length - 1; k++) {          // the story's last frame stays as is
@@ -856,7 +1053,7 @@ for (var li = 0; li < ladder.length; li++) {
         if (!L) throw e;
     }
 }
-if (CFG.embedFigures) {
+if (CFG.embedFigures && M.embed_figures !== false) {
     var embedded = 0, failed = [];
     for (var k = doc.links.length - 1; k >= 0; k--) {
         var lk = doc.links[k];
@@ -866,6 +1063,7 @@ if (CFG.embedFigures) {
     LOG.push("Embedded " + embedded + " figure file(s) in the .indd" +
              (failed.length ? "; could not embed: " + failed.join(", ") : ""));
 }
+if (M.embed_figures === false) LOG.push("Figures linked, not embedded: keep the figure folder next to the .indd");
 doc.save(File(OUTPDF.fsName.replace(/\.pdf$/i, "") + ".indd"));
 LOG.push("pages: " + doc.pages.length);
 doc.close(SaveOptions.NO);

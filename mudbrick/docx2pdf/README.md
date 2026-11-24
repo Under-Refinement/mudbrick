@@ -99,7 +99,7 @@ layout follows a journal-style supplement:
 
 * **Cover page:** "Supplementary Information" above the main paper's title, authors,
   affiliations and correspondence.
-* **Sections:** SUPPLEMENTARY MOVIES, SUPPLEMENTARY TABLES and SUPPLEMENTARY FIGURES
+* **Sections:** SUPPLEMENTARY MOVIES, SUPPLEMENTARY FIGURES and SUPPLEMENTARY TABLES
   (setting `supplement_order`), each starting a new page under a red header. Only
   sections with content appear.
 * **Movies:** each legend at full width.
@@ -107,22 +107,32 @@ layout follows a journal-style supplement:
   * Real InDesign tables in the two-column grid, with the caption below the table. A
     table that Word sized narrower than a column takes one column; wider tables span both
     (setting `supplement_table_columns`).
-  * The style is minimal: rules above and below the table and under each row of column
-    headings, and no other lines. A bold row spanning the table (e.g. "Overall
-    performance") becomes a light grey band.
-  * Merged cells and Word's column widths are kept, and a bold first row repeats as the
-    header when a table has to break.
+  * The tables can be in their own Word file: a .docx whose name starts with "Table"
+    (e.g. `Tables S1-6.docx`) next to the manuscript or in the figure folder, or chosen
+    with `--supp-tables FILE` (setting `supplement_tables_docx`). Tables in the
+    supplement file are then ignored.
+  * The style is minimal: rules above and below the table and one under the column
+    headings; a group heading spanning several columns (e.g. "tRNA" over "P-site" and
+    "A-site") gets a short rule under just those columns. No other lines. Row labels are
+    left-aligned and the other columns centred. A bold row spanning the table (e.g.
+    "Overall performance") becomes a light grey band.
+  * Heading rows are the top rows whose first cell is empty or bold; they repeat when a
+    table has to break. Merged cells, Word's column widths, line breaks within a cell
+    and bold, italic, superscript and subscript text are kept as typed.
   * A table that fits on a page is never split, and stays with its caption. A note
     paragraph after a table is kept with it.
 * **Figures:**
-  * One per page (setting `supplement_figure_per_page`), with the caption below on the
-    same page.
-  * A figure grows to the full width when figure and caption still fit; otherwise it is
-    made as large as fits.
+  * One per page. The figure and its legend are separate, unlinked frames (the legend
+    is not part of the supplement's text flow), so either can be moved or resized by
+    hand in InDesign. The section heading is a frame of its own on the first figure page.
+  * A figure is placed at 100% of its size (never scaled, so its font sizes stay as
+    drawn), trimmed to its artwork and centred at the top of the page, with its legend
+    right below. If it is wider than the column or too tall to fit with its legend, it
+    overprints the margins (or the legend) and a warning says by how much.
   * The caption's bold title runs into its text (setting `supplement_title_inline`).
-* **Page numbers** continue from the main PDF (setting `supplement_page_numbers`:
-  `"continue"` or `"S"`). When the main PDF's page count is unknown, pages are numbered
-  S1, S2, …
+* **Page numbers** are SI-1, SI-2, … (setting `supplement_page_prefix`). With
+  `"supplement_page_numbers": "continue"` they continue from the main PDF instead (and
+  fall back to the prefixed numbers when the main PDF's page count is unknown).
 * **Labels** follow the manuscript's citation style: `Figure S1.` / `Table S1.` /
   `Movie S1.` when the text cites "Figure S1", otherwise `Supplementary Figure 1.` and so
   on. Odd original wording ("Table 1:", "Supplementary Figure. 5.") is normalized.
@@ -172,11 +182,20 @@ a missing legend, notes like `[jhd stopped here]`, or several running titles.
 * The abstract block on page 1 ends at 730 pt (`abstractBottom`), leaving clear space
   above the footer rule.
 * Otherwise, each figure goes at the top of the page after the page where it is first cited.
-  A figure can shrink to 90% of its file size so that more of its legend fits on the
-  same page. Legend panels that still don't fit continue at the foot of the next page,
-  under "Figure N (continued from prior page)."
+  A figure is placed at 100% of its size, never scaled, so its font sizes stay as drawn.
+  Its white margins are trimmed (the Illustrator artboard need not fit the artwork) and
+  the artwork is centred on the text column; if it is wider than the column it overprints
+  into the side margins and a warning says by how much. Legend panels that don't fit
+  under it continue at the foot of the next page, under "Figure N (continued from prior
+  page)."
+* The paper's text runs in two separate, linked text frames per page (one per column),
+  so either column's height can be adjusted by hand in InDesign. The supplement uses one
+  two-column frame per page, because its captions and wide tables span both columns.
 * Figures have no border. Use `--figure-border`, or `"figure_border": true` in a
   settings file, to draw a thin 0.5 pt border around every figure in both PDFs.
+* Figure files are embedded in the saved .indd files, so they open on any computer.
+  Use `--link-figures`, or `"embed_figures": false`, to keep them linked to the figure
+  files instead, which keeps the .indd small.
 * Stand-alone Word equations (made with Insert → Equation, on their own line,
   optionally followed by a number such as `(1)`) are converted to LaTeX and typeset
   with TeX, in Myriad Pro: letters, digits and Greek come from the body font, and only
@@ -196,9 +215,19 @@ a missing legend, notes like `[jhd stopped here]`, or several running titles.
   Headings keep exactly their usual spacing, so a column with few paragraph breaks may
   still end slightly short. Settings: `fillColumns` and `columnFillLimit` in
   `layout.jsx`.
-* All body paragraphs are spaced evenly, 6 pt apart, and every heading and subheading
-  has the same 10 pt above it (`paragraphSpacing` and `headingSpaceAbove` in
-  `layout.jsx`). To keep runs of short lines, such as an author-contributions list,
+* All body paragraphs are spaced evenly, 6 pt apart, and every section heading has
+  10 pt above it (`paragraphSpacing` and `headingSpaceAbove` in `layout.jsx`).
+  Subheadings get no extra space: just the paragraph spacing after body text, and none
+  directly under a section heading (`subheadingSpaceAbove`).
+* References are 3 pt apart (`referenceSpacing`), and that spacing is never widened to
+  fill out a column.
+* Subscripts are set as subscript and raised 2 pt (`subscriptShift` in `layout.jsx`).
+  "OD600" always gets a subscript 600, even when typed plainly (`AUTO_SUBSCRIPTS` in
+  `convert.py`).
+* Figure references in the text ("Figure 1A", "Figures 2A, 3B-D and S4", "Fig. S2",
+  "Supplementary Figure 3") are set in semibold, through a "Figure reference" character
+  style that can be restyled in InDesign (`figureRefStyle`; `null` leaves them as typed).
+  A reference written in lowercase ("figure 3B") gets a warning. To keep runs of short lines, such as an author-contributions list,
   tight instead, set `"uniform_paragraph_spacing": false`.
 * A legend's bold title sits on its own line, and the panels then run on in one
   paragraph: "…end of A. **(B)** …". If a legend doesn't fit under its figure, it

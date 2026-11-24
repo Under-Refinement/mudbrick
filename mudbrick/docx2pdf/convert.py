@@ -60,13 +60,17 @@ DEFAULT_CONFIG = {
     # ("Supplementary Figure 2. Title. (left) ...") instead of giving it its own line.
     "supplement_title_inline": True,
     # Supplement sections, in order (each only if present).
-    "supplement_order": ["movies", "tables", "figures"],
-    # Each supplementary figure starts on a new page.
-    "supplement_figure_per_page": True,
+    "supplement_order": ["movies", "figures", "tables"],
+    # Word file holding the supplementary tables (their "Table S1." titles, tables and
+    # notes). Default: a .docx whose name starts with "Table", next to the manuscript or
+    # in the figure folder. When there is one, tables in the supplement file are ignored.
+    "supplement_tables_docx": None,
     # Tables narrower than a column sit in one column; wider ones span both.
     "supplement_table_columns": True,
-    # Supplement page numbers: "continue" from the main PDF (S1, S2, ... if unknown) or "S".
-    "supplement_page_numbers": "continue",
+    # Supplement page numbers: "prefix" (SI-1, SI-2, ... with supplement_page_prefix) or
+    # "continue" from the main PDF (prefixed numbers if its page count is unknown).
+    "supplement_page_numbers": "prefix",
+    "supplement_page_prefix": "SI-",
     # Use the pictures embedded in the captions document even when figure files exist.
     # (They are always used for figures that have no file.)
     "figures_from_captions": False,
@@ -74,6 +78,9 @@ DEFAULT_CONFIG = {
     "min_print_ppi": 300,
     # Draw a thin border around every figure (main paper and supplement).
     "figure_border": False,
+    # Embed the figure files in the saved .indd (it then opens anywhere, but is large).
+    # False: keep them linked to the files in the figure folder.
+    "embed_figures": True,
     # Typeset stand-alone Word equations with TeX in the body font (needs a TeX engine
     # such as Tectonic: brew install tectonic). Off, or without TeX: plain text.
     "typeset_equations": True,
@@ -402,6 +409,7 @@ class Tagged:
             runs[-1] = (runs[-1][0].rstrip(), runs[-1][1])
         if ITALIC_ET_AL:
             runs = italicize(runs, r"\bet al\.")
+        runs = subscript_auto(runs)
         out = "<pstyle:%s>" % pstyle
         for text, f in runs:
             text = fix_typography(text).replace("\n", LINE_BREAK)
@@ -677,6 +685,27 @@ def extract_caption_images(docx_path, blocks, number_of, out_dir, name):
 # Manuscript structure
 # ----------------------------------------------------------------------------
 
+# Text set as a subscript wherever it appears, typed as one or not: (pattern, group).
+AUTO_SUBSCRIPTS = [(r"\bOD(600)(?!\d)", 1)]   # OD600 -> OD with a subscript 600
+
+
+def subscript_auto(runs):
+    """Make the AUTO_SUBSCRIPTS matches subscript (also across Word's run boundaries)."""
+    text = "".join(t for t, _ in runs)
+    marks = set()
+    for pattern, group in AUTO_SUBSCRIPTS:
+        for m in re.finditer(pattern, text):
+            marks.update(range(m.start(group), m.end(group)))
+    if not marks:
+        return runs
+    out, pos = [], 0
+    for t, f in runs:
+        for c in t:
+            out.append((c, dict(f, sub=True, sup=False) if pos in marks else f))
+            pos += 1
+    return merge_runs(out)
+
+
 def italicize(runs, pattern):
     """Split runs so that matches of pattern are italic."""
     out = []
@@ -891,6 +920,7 @@ def convert(docx_path, out_dir, cfg, fig_dir=None, write_outputs=True):
     manifest["missing_glyphs"] = sorted("U+%04X" % ord(c) for c in miss)
     manifest["warnings"] = WARNINGS
     manifest["figure_border"] = cfg["figure_border"]
+    manifest["embed_figures"] = cfg["embed_figures"]
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=1, ensure_ascii=False)
     return manifest
@@ -1194,14 +1224,33 @@ def supplement_label(kind, n, style):
     return "%s S%d." % (kind, n) if style == "S" else "Supplementary %s %d." % (kind, n)
 
 
+CELL_FLAGS = ("b", "i", "sup", "sub")
+
+
+def _cell_runs(ps):
+    """A cell's paragraphs as [[text, flags]] runs, paragraphs joined by "\n", keeping
+    bold / italic / superscript / subscript exactly as typed (text itself unchanged,
+    apart from look-alike characters the font lacks)."""
+    out = []
+    for k, p in enumerate(ps):
+        runs = [(fix_typography(t), f) for t, f in subscript_auto(merge_runs(p["runs"])) if t]
+        if runs:   # trim the paragraph's outer white space, as ptext() does
+            runs[0] = (runs[0][0].lstrip(), runs[0][1])
+            runs[-1] = (runs[-1][0].rstrip(), runs[-1][1])
+        if k:
+            out.append(["\n", []])
+        out += [[t, [x for x in CELL_FLAGS if f.get(x)]] for t, f in runs if t]
+    return out
+
+
 def _table_data(b):
     rows = []
     for row in b["rows"]:
         cells = []
         for cell in row:
             ps = [p for p in cell["paras"] if ptext(p)]
-            text = "" if cell["vcont"] else "\n".join(fix_typography(ptext(p)) for p in ps)
-            cells.append({"t": text, "span": cell["span"],
+            runs = [] if cell["vcont"] else _cell_runs(ps)
+            cells.append({"t": "".join(t for t, _ in runs), "runs": runs, "span": cell["span"],
                           "b": bool(ps) and all(all_bold(p) for p in ps)})
         rows.append(cells)
     ncols = max([sum(c["span"] for c in r) for r in rows] + [len(b["grid"])])
@@ -1210,9 +1259,53 @@ def _table_data(b):
     return {"rows": rows, "grid": grid, "width_pt": width_pt}
 
 
+def _collect_tables(blocks, style):
+    """Supplementary tables from a Word file: each "Table SN." title with the table under
+    (or above) it and the note paragraphs that follow."""
+    tables, last, waiting = [], None, None
+    for b in blocks:
+        if b["kind"] == "table":
+            data = _table_data(b)
+            if last is not None and "data" not in last:
+                last["data"] = data
+            else:
+                waiting = data
+            continue
+        t = ptext(b)
+        if not t:
+            continue
+        m = SUPP_CAPTION.match(t)
+        if m and SUPP_KIND[m.group(1).lower()] == "Table":
+            n = int(m.group(2))
+            lead = len(b["runs"][0][0]) - len(b["runs"][0][0].lstrip())
+            item = {"num": n, "notes": [],
+                    "caption": _relabel(b["runs"], m.end() - lead, supplement_label("Table", n, style))}
+            if waiting is not None:
+                item["data"], waiting = waiting, None
+            tables.append(item)
+            last = item
+        elif last is not None and "data" in last:
+            last["notes"].append(b)
+        else:
+            WARNINGS.append("Text in the tables file outside any table left out: %s" % t[:60])
+    return tables
+
+
+def find_tables_docx(docx_path, fig_dir=None):
+    """A .docx whose name starts with "Table" (e.g. "Tables S1-6.docx"), next to the
+    manuscript or in the figure folder."""
+    found = []
+    for folder in [os.path.dirname(os.path.abspath(docx_path))] + ([fig_dir] if fig_dir else []):
+        if os.path.isdir(folder):
+            found += [os.path.join(folder, x) for x in os.listdir(folder)
+                      if x.lower().endswith(".docx") and x.lower().startswith("table")]
+    return max(found, key=os.path.getmtime) if found else None
+
+
 def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, fig_dir=None):
     """Supplementary .docx -> cover.txt (cover page) + si.txt (a two-column story with
-    [[FIG:n]] / [[TABLE:n]] placeholders, in sections: movies, tables, figures) +
+    [[TABLE:n]] placeholders and a [[FIGPAGES]] marker where the figure pages go;
+    each figure's legend is its own si_legend_N.txt) +
     manifest.json for layout.jsx's supplement mode."""
     global ITALIC_ET_AL, LEGEND_INLINE
     del WARNINGS[:]
@@ -1224,6 +1317,9 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, 
     style = supplement_label_style(mparas)
     blocks = read_blocks(supp_docx, cfg["tracked_changes"])
     images = extract_caption_images(supp_docx, blocks, _supp_number, out_dir, "supp_fig%d")
+    tables_docx = cfg.get("supplement_tables_docx") or find_tables_docx(manuscript_docx, fig_dir)
+    if tables_docx and os.path.abspath(tables_docx) == os.path.abspath(supp_docx):
+        tables_docx = None
 
     # ---- cover page: "Supplementary Information" over the main title block ----
     cover = Tagged()
@@ -1286,11 +1382,20 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, 
             item.update(file=path, px=pixel_width(path), crop=crop, source=source)
         items["figures"].append(item)
 
+    if tables_docx:   # the tables come from their own Word file
+        if items["tables"]:
+            WARNINGS.append("Tables in %s ignored; the tables come from %s"
+                            % (os.path.basename(supp_docx), os.path.basename(tables_docx)))
+        items["tables"] = _collect_tables(read_blocks(tables_docx, cfg["tracked_changes"]), style)
+
     # ---- write the story ----------------------------------------------------------
     tg = Tagged()
     figures, tables = [], []
 
-    def caption(runs, style_inline, style_title, style_text):
+    legend_cstyles = set()
+
+    def caption(runs, style_inline, style_title, style_text, out=None):
+        out = out or tg
         legend = normalize_legend([runs])
         if cfg["supplement_title_inline"]:
             merged = []
@@ -1302,13 +1407,24 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, 
         else:
             legend = [(style_title if st == "LegendTitle" else style_text, r) for st, r in legend]
         for st, r in legend:
-            tg.para(st, r, bold_flag="sb")
+            out.para(st, r, bold_flag="sb")
 
     for section in cfg["supplement_order"]:
         group = sorted(items[section], key=lambda x: x["num"])
         if not group:
             continue
-        tg.para("SISection", [(SECTION_TITLE[section], {})])
+        if section == "figures":
+            # Figures get pages of their own, inserted here by layout.jsx: on each, the
+            # figure and its legend are separate frames (the legend is not part of this
+            # story), so they can be moved independently. The section heading is a frame
+            # of its own on the first figure page.
+            head = Tagged()
+            head.para("SISection", [(SECTION_TITLE[section], {})])
+            head.write(os.path.join(out_dir, "si_figures_head.txt"))
+            legend_cstyles.update(head.cstyles)
+            tg.para("SIFigurePages", [("[[FIGPAGES]]", {})])
+        else:
+            tg.para("SISection", [(SECTION_TITLE[section], {})])
         for k, item in enumerate(group):
             if section == "movies":
                 caption(item["caption"], "SIMovie", "SIMovieTitle", "SIMovie")
@@ -1327,17 +1443,22 @@ def convert_supplement(supp_docx, manuscript_docx, out_dir, cfg, running_title, 
                 for nb in item["notes"]:
                     tg.para("SINote" + sfx, nb["runs"])
             elif "file" in item:
-                first = k == 0
-                tg.para("SIFigure" if first or not cfg["supplement_figure_per_page"]
-                        else "SIFigureNewPage", [("[[FIG:%d]]" % len(figures), {})])
-                figures.append({x: item[x] for x in ("num", "file", "px", "crop", "source")})
-                caption(item["caption"], "SICaption", "SICaptionTitle", "SICaption")
+                lg = Tagged()
+                caption(item["caption"], "SICaption", "SICaptionTitle", "SICaption", out=lg)
+                name = "si_legend_%d.txt" % item["num"]
+                lg.write(os.path.join(out_dir, name))
+                legend_cstyles.update(lg.cstyles)
+                fig = {x: item[x] for x in ("num", "file", "px", "crop", "source")}
+                fig["legend"] = name
+                figures.append(fig)
     tg.write(os.path.join(out_dir, "si.txt"))
     manifest = {"mode": "supplement", "running_title": running_title,
                 "figure_border": cfg["figure_border"],
+                "page_prefix": cfg["supplement_page_prefix"],
+                "embed_figures": cfg["embed_figures"],
                 "figures": [], "si_figures": figures, "tables": tables,
                 "movies": len(items["movies"]), "label_style": style,
-                "cstyles": sorted(tg.cstyles | cover.cstyles | {"cs_sb_i"}),
+                "cstyles": sorted(tg.cstyles | cover.cstyles | legend_cstyles | {"cs_sb_i"}),
                 "missing_glyphs": sorted("U+%04X" % ord(c) for c in tg.missing | cover.missing),
                 "warnings": WARNINGS}
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:

@@ -63,7 +63,7 @@ These are saved next to the manuscript:
 | File | What it is |
 |---|---|
 | `paper_preprint.pdf` and `.indd` | The preprint |
-| `paper_supplement.pdf` and `.indd` | The supplement, with pages numbered S1, S2, … (only if there is a supplement file) |
+| `paper_supplement.pdf` and `.indd` | The supplement, with pages numbered SI-1, SI-2, … (only if there is a supplement file) |
 | `paper_figure_legends.docx` | All the main figure captions in one Word file |
 
 ## Sharp figures: use `.ai` files
@@ -124,21 +124,24 @@ The supplement file should be set up like this:
   `figure_1/` inside a `supplementary/` folder). If there is no file, the picture pasted
   directly above the caption is used. The two can be mixed.
 - **Tables:** normal Word tables, each with a caption starting `Supplementary Table 1.`
-  (above or below the table in Word). Column headings should be bold. A bold row that spans the whole
+  (above or below the table in Word), in the supplement file or in a file of their own
+  whose name starts with "Table" (e.g. `Tables S1-6.docx`, next to the manuscript or in the
+  figure folder; or `--supp-tables FILE`). Column headings should be bold. A bold row that spans the whole
   table (like "Overall performance") becomes a grey section band.
 
 The supplement is laid out like a journal supplement:
 
 - **A cover page:** "Supplementary Information" above the paper's title, authors and
   affiliations, all taken from the manuscript.
-- **Sections:** SUPPLEMENTARY MOVIES, TABLES and FIGURES, each starting on a new page
+- **Sections:** SUPPLEMENTARY MOVIES, FIGURES and TABLES, each starting on a new page
   (only those that exist).
 - **Tables** sit in the two-column grid with the caption below. Narrow tables take one
   column and wide ones span both.
-- **Figures** come one per page, with the caption below.
-- **Page numbers** continue from the main preprint (if it is 14 pages, the supplement
-  starts at 15). With `--supplement-only` and no preprint built yet, pages are numbered
-  S1, S2, … instead.
+- **Figures** come one per page, with the caption below; figure and caption are separate
+  frames, so each can be moved on its own in InDesign.
+- **Page numbers** are SI-1, SI-2, … To continue from the main preprint instead (if it
+  is 14 pages, the supplement starts at 15), set `"supplement_page_numbers": "continue"`
+  in a settings file.
 - **Labels** follow how the manuscript cites the supplement: "Figure S1." if the text says
   "Figure S1", or "Supplementary Figure 1." if it says "Supplementary Figure 1".
 
@@ -170,8 +173,11 @@ The supplement is laid out like a journal supplement:
 - **Data availability, author contributions** and similar sections are moved after the
   references, whether they were written as headings or as bold labels at the start of a
   paragraph.
-- **In the supplement,** every figure stays on the same page as its caption and grows to the
-  full caption width when it fits. Tables become real InDesign tables in a clean, minimal
+- **Figure references** in the text ("Figure 1B, S1C") are set in semibold.
+- **Figures are never scaled,** so their font sizes stay as drawn: each is trimmed to its
+  artwork, centred, and placed at 100%. One wider or taller than the space overprints the
+  margins, with a warning.
+- **In the supplement,** every figure stays on the same page as its caption. Tables become real InDesign tables in a clean, minimal
   style, and a table that fits on one page is never split.
 - **The PDF** is made for printing: lossless images, fully embedded fonts, and anything above
   600 ppi reduced to 450 ppi to keep file sizes reasonable.
@@ -185,9 +191,11 @@ The supplement is laid out like a journal supplement:
 | `--dry-run` | Check everything without making PDFs |
 | `--supplement FILE` | Choose the supplement file directly |
 | `--supplement-only` | Only make the supplement |
+| `--supp-tables FILE` | Take the supplementary tables from this Word file |
 | `--no-supplement` | Skip the supplement |
 | `--figures-from-captions` | Use the figures pasted into Word even if figure files exist |
 | `--figure-border` | Add a thin border around every figure |
+| `--link-figures` | Link the figure files from the .indd instead of embedding them |
 | `-c settings.json` | Change other settings for one paper |
 
 The tool can also be written as a flag: `mudbrick --docx2pdf paper.docx`.

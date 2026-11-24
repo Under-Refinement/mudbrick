@@ -272,17 +272,68 @@ class Docx2PdfThreeDocuments(unittest.TestCase):
         self.assertEqual(m["tables"][0]["rows"][0][0]["span"], 2)
         with open(os.path.join(self.build, "si.txt")) as fh:
             si = fh.read()
-        self.assertIn("Supplementary Figure 1.", si)
+        # figures get their own pages; each legend is a separate frame, not in the story
+        self.assertIn("[[FIGPAGES]]", si)
+        self.assertNotIn("Supplementary Figure 1.", si)
+        self.assertEqual(m["si_figures"][0]["legend"], "si_legend_1.txt")
+        with open(os.path.join(self.build, "si_legend_1.txt")) as fh:
+            legend = fh.read()
+        with open(os.path.join(self.build, "si_figures_head.txt")) as fh:
+            self.assertIn("SUPPLEMENTARY FIGURES", fh.read())
         self.assertIn("Supplementary Table 1.", si)
-        self.assertLess(si.index("[[FIG:0]]"), si.index("Supplementary Figure 1."))
-        self.assertNotIn("<pstyle:LegendTitle>", si)   # title runs into the caption text
+        self.assertNotIn("<pstyle:LegendTitle>", legend)   # title runs into the caption text
         with open(os.path.join(self.build, "cover.txt")) as fh:
             cover = fh.read()
         self.assertIn("<pstyle:SICoverHead>Supplementary Information", cover)
         self.assertIn("<pstyle:AffilFirst>1. Department of Biology", cover)  # same as main title page
         self.assertLess(si.index("[[TABLE:0]]"), si.index("Supplementary Table 1."))  # caption below
-        self.assertLess(si.index("SUPPLEMENTARY TABLES"), si.index("SUPPLEMENTARY FIGURES"))
-        self.assertIn("<pstyle:SICaption><cstyle:cs_sb>Supplementary Figure 1.", si)
+        self.assertLess(si.index("[[FIGPAGES]]"), si.index("SUPPLEMENTARY TABLES"))  # tables last
+        self.assertIn("<pstyle:SICaption><cstyle:cs_sb>Supplementary Figure 1.", legend)
+
+    def test_supplement_tables_from_their_own_file(self):
+        supp = convert.find_supplement_docx(self.docx)
+        tables = os.path.join(self.dir, "figs", "Tables S1-2.docx")
+        os.makedirs(os.path.dirname(tables))
+        write_docx(tables, [
+            para(run("Table S1. ", b=True), run("First table")),
+            table([[("Origin", 1, True), ("1", 1, False)], [("x", 1, False), ("2", 1, False)]]),
+            para(run("*a note under the table.")),
+            para(run("Table S2. ", b=True), run("Second table")),
+            table([[("A", 1, True), ("B", 1, True)], [("c", 1, False), ("d", 1, False)]])])
+        # a superscript inside a cell is kept as a run of its own
+        with zipfile.ZipFile(tables) as z:
+            doc = z.read("word/document.xml").decode()
+        doc = doc.replace('<w:t xml:space="preserve">1</w:t>',
+                          '<w:t xml:space="preserve">1</w:t></w:r><w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:t>st</w:t>', 1)
+        write_raw = {}
+        with zipfile.ZipFile(tables) as z:
+            for n in z.namelist():
+                write_raw[n] = z.read(n)
+        write_raw["word/document.xml"] = doc.encode()
+        with zipfile.ZipFile(tables, "w") as z:
+            for n, d in write_raw.items():
+                z.writestr(n, d)
+        self.assertEqual(convert.find_tables_docx(self.docx, os.path.dirname(tables)), tables)
+        m = convert.convert_supplement(supp, self.docx, self.build, dict(convert.DEFAULT_CONFIG),
+                                       "RT", os.path.dirname(tables))
+        self.assertEqual([len(t["rows"]) for t in m["tables"]], [2, 2])   # from the tables file only
+        cell = m["tables"][0]["rows"][0][1]
+        self.assertEqual(cell["t"], "1st")
+        self.assertEqual(cell["runs"], [["1", []], ["st", ["sup"]]])
+        with open(os.path.join(self.build, "si.txt")) as fh:
+            si = fh.read()
+        self.assertIn("a note under the table", si)
+        self.assertTrue(any("ignored" in w for w in m["warnings"]))  # supplement's own table
+
+    def test_od600_subscript(self):
+        flags = lambda runs: [(t, bool(f.get("sub"))) for t, f in convert.subscript_auto(runs)]
+        self.assertEqual(flags([("grown to OD600 0.3", {})]),
+                         [("grown to OD", False), ("600", True), (" 0.3", False)])
+        self.assertEqual(flags([("an OD", {}), ("600", {"b": True})]), [("an OD", False), ("600", True)])
+        self.assertEqual(flags([("OD6000 and GOD600", {})]), [("OD6000 and GOD600", False)])
+        tg = convert.Tagged()
+        tg.para("Body", [("OD600 of 0.5", {})])
+        self.assertIn("OD<cstyle:cs_sub>600<cstyle:>", tg.paras[0])
 
     def test_supplement_labels_follow_manuscript_citations(self):
         cite = lambda text: [{"runs": [(text, {})]}]
